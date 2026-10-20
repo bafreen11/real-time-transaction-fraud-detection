@@ -1,0 +1,9 @@
+data/
+outputs/
+archive/
+mlruns/
+mlflow.db
+scripts/
+streaming/
+**/__pycache__/
+*.egg-info/

@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Large generated data and outputs
+data/processed/
+outputs/predictions/
+archive/legacy_graph_prototype/*.csv
+archive/legacy_graph_prototype/*.pt
+
+# Experiment tracking
+mlruns/
+mlflow.db

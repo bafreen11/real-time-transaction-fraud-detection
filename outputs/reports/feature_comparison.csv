@@ -1,0 +1,5 @@
+,origin_balance_error,origin_balance_error,destination_balance_error,destination_balance_error,amount_to_origin_balance,amount_to_origin_balance,amount_to_destination_balance,amount_to_destination_balance,step_day,step_day,step_hour,step_hour
+,mean,median,mean,median,mean,median,mean,median,mean,median,mean,median
+isFraud,,,,,,,,,,,,
+0,-201338.5581,-69049.31,54692.2317,3500.68,70764.3209,6.5116,26666.3083,0.9151,9.485,9.0,14.5956,15.0
+1,-10692.3253,0.0,732509.3011,2231.46,1161.9667,1.0,969883.4369,116419.58,14.8329,15.0,11.4231,11.0

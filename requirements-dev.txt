@@ -1,0 +1,10 @@
+# API / serving dependencies
+-r requirements.txt
+
+# Analysis, training, tracking and streaming
+matplotlib
+mlflow
+torch
+torch_geometric
+kafka-python
+requests
