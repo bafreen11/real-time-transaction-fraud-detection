@@ -11,7 +11,7 @@ flowchart LR
         SPLIT --> GRAPH[Account graph<br/>training rows only]
         GRAPH --> GNN[GraphSAGE GNN]
         SPLIT --> XGB2[Shared XGBoost]
-        GNN --> BLEND[Blend comparison]
+        GNN --> BLEND[Blend chosen on validation]
         XGB2 --> BLEND
         RAW --> SNAP[Recipient state snapshots]
         SNAP --> FEAST[(Feast<br/>offline parquet +<br/>online SQLite)]
@@ -103,7 +103,7 @@ sequenceDiagram
 | Class weighting (`scale_pos_weight`) | stops the model from ignoring the rare fraud class |
 | Threshold and blend weight chosen on **validation**, reported on **test** | choosing them on test would overstate the results |
 | One feature function shared by training and serving | prevents training/serving skew; covered by tests |
-| GNN graph built from training rows only; unseen accounts get zero embeddings | prevents test leakage; matches reality for new customers |
+| GNN graph built from training rows only; unseen accounts get zero embeddings; a transaction is never in the graph that embeds its own accounts during training | prevents test leakage and the training/test mismatch; matches reality for new customers |
 | History per **recipient**, not sender | 99.7% of PaySim senders appear only once |
 | Point-in-time lookups at timestamp − 1 ms | a transaction must not see its own effect or the future |
 | GNN exported to numpy | keeps PyTorch (1+ GB) out of the service image |
@@ -166,7 +166,7 @@ Fraud by type (`outputs/reports/fraud_by_type.csv`):
 | Track | Split | Sizes |
 |---|---|---|
 | Baseline | 10% stratified sample → 70% train / 10% validation / 20% test | test: 127,253 rows, 164 fraud |
-| Shared | full data 80/20 stratified; train = all fraud + 100,000 legitimate | train 106,570 rows; test ≈ 1.27M rows (kept whole) |
+| Shared | full data 80/20 stratified; train = all fraud + 100,000 legitimate, of which 15% is validation (metrics weighted to the natural fraud rate) | fit 90,584 / validation 15,986 rows; test ≈ 1.27M rows (kept whole) |
 | Stream | shared split; 25% of the test side halved | validation 159,065 / test 159,066 rows (206 fraud) |
 
 Random seed: 42 everywhere (`config.RANDOM_STATE`).
@@ -183,7 +183,7 @@ Random seed: 42 everywhere (`config.RANDOM_STATE`).
 | `feature_repo/data/online_store.db` | `build_feature_store.py`, fraud service | latest recipient state (Feast online store) |
 | `data/serving/fraud_cases.db` | fraud service | table `scored_transactions` (see below) |
 | `models/fraud_xgboost_validated_model.joblib` | `validate_and_test_model.py` | `{model, feature_columns, threshold}`; served on :8000 (14 features, threshold 0.3) |
-| `models/shared_fraud_gnn_model.pt` | `train_shared_gnn.py` | GNN weights, account map, scaler |
+| `models/shared_fraud_gnn_model.pt` | `train_shared_gnn.py` | GNN weights, account map, scaler, training strategy |
 | `models/gnn_serving_artifact.joblib` | `export_gnn_for_serving.py` | embeddings + classifier weights (numpy) |
 | `models/stream_xgboost_model.joblib` | `train_stream_model.py` | `{model, feature_columns, threshold, gnn_weight, version}`; served on :8001 |
 | `models/archive/` | `train_stream_model.py` | every candidate and the previous production model |

@@ -27,7 +27,7 @@ Built-in pipeline checks (they stop the script if they fail):
 | offline recipient snapshots = streaming updates on 200,000 rows | `scripts/feast/build_feature_store.py` |
 | exported numpy GNN reproduces PyTorch predictions on 20,000 rows (max diff < 1e-4) | `scripts/feast/export_gnn_for_serving.py` |
 | recreated split matches `shared_train.csv` | `scripts/feast/train_stream_model.py` |
-| XGBoost and GNN prediction files are row-aligned | `scripts/shared/blend_shared_models.py` |
+| XGBoost and GNN prediction files are row-aligned (validation and test) | `scripts/shared/blend_shared_models.py` |
 | served features = training features for 500 streamed transactions (max diff 0.0) | manual check during development |
 
 ## 2. Baseline XGBoost (served by the API on port 8000)
@@ -59,17 +59,38 @@ Before the type flags, the served model scored AP 0.9856, precision 0.8703, reca
 
 ## 3. Shared split: XGBoost vs GNN vs blend
 
-Full 20% test set (≈1.27M transactions), threshold 0.5. Exploratory: the weights were compared on the test set, so this table is not used to pick a production model.
+**Selection (validation only).** 15% of `shared_train.csv` (15,986 rows, 986 frauds) is held out; both models train on the other 85%. `shared_train.csv` is ~6% fraud (all fraud + 100,000 legitimate rows), so validation metrics weight each legitimate row by ~50.8 to restore the natural 0.13% fraud rate. Without this, the chosen threshold would raise far too many alerts on real traffic.
 
-| XGBoost / GNN weight | Avg. precision | Precision | Recall | F1 |
-|---|---|---|---|---|
-| 1.00 / 0.00 | **0.9983** | 0.8556 | 0.9988 | 0.9217 |
-| 0.75 / 0.25 | 0.9967 | 0.8582 | 0.9982 | 0.9229 |
-| 0.50 / 0.50 | 0.9962 | 0.8636 | 0.9982 | 0.9260 |
-| 0.25 / 0.75 | 0.9946 | 0.8595 | 0.9976 | 0.9234 |
-| 0.00 / 1.00 | 0.3206 | 0.0048 | 0.9002 | 0.0095 |
+GNN training strategy (`outputs/reports/shared_gnn_strategy_comparison.csv`, threshold 0.5):
 
-**Takeaway:** the GNN alone is weak (AP 0.32) because PaySim accounts rarely repeat, so the graph has little structure. Blending gives a small precision gain and no average-precision gain.
+| Strategy | Val. avg. precision (weighted) |
+|---|---|
+| **disjoint: a scored transaction is never in its own message-passing graph (kept)** | **0.3156** |
+| transductive: the original method, every training edge is also a message edge | 0.3098 |
+
+Best threshold per blend weight on validation (`outputs/reports/shared_blend_validation_selection.csv`; ties go to the higher threshold):
+
+| XGBoost / GNN weight | Threshold | Val. avg. precision | Val. precision | Val. recall | Val. F1 |
+|---|---|---|---|---|---|
+| **1.00 / 0.00 (selected)** | **0.95** | **0.9944** | **1.0000** | **0.9939** | **0.9969** |
+| 0.90 / 0.10 | 0.90 | 0.9939 | 1.0000 | 0.9939 | 0.9969 |
+| 0.75 / 0.25 | 0.80 | 0.9939 | 1.0000 | 0.9939 | 0.9969 |
+| 0.50 / 0.50 | 0.65 | 0.9939 | 1.0000 | 0.9939 | 0.9969 |
+| 0.25 / 0.75 | 0.55 | 0.9939 | 1.0000 | 0.9888 | 0.9944 |
+| 0.00 / 1.00 | 0.65 | 0.3156 | 0.5169 | 0.2759 | 0.3597 |
+
+**Test (scored once, after the choices were fixed).** Full 20% test set: 1,272,524 transactions, 1,643 frauds (`outputs/reports/shared_blend_test_results.csv`):
+
+| Model (threshold from validation) | Avg. precision | Precision | Recall | F1 | False alarms | Missed fraud |
+|---|---|---|---|---|---|---|
+| **Selected: XGBoost only (0.95)** | **0.9986** | **0.9727** | **0.9976** | **0.9850** | **46** | **4** |
+| GNN only (0.65), for reference | 0.3166 | 0.5277 | 0.2666 | 0.3542 | 392 | 1,205 |
+
+Figures: `outputs/figures/shared_blend_pr_curve.png`, `outputs/figures/shared_blend_confusion_matrix.png`.
+
+**Takeaway:** the GNN alone is weak (AP 0.32) because PaySim accounts rarely repeat, so the graph has little structure. On validation, adding it to XGBoost never beats XGBoost alone, so the selected model gives the GNN weight 0. Removing the GNN's edge shortcut did not change its test AP noticeably (0.3166, against 0.3206 for the earlier GNN).
+
+Earlier versions of this table compared blend weights on the test set at threshold 0.5. That was exploratory and has been replaced by the validation selection above.
 
 ## 4. Stream model (served by the fraud service on port 8001)
 
@@ -88,7 +109,9 @@ Comparison inside the first run (same test rows):
 | XGBoost only (threshold 0.9) | 0.9993 | 0.9361 | 0.9951 | 0.9647 |
 | GNN only (threshold 0.5) | 0.3103 | 0.0047 | 0.8883 | 0.0094 |
 
-With the 7 extra features (transaction type + recipient history from Feast), precision is 0.96 against the baseline's 0.87 at about the same recall. The test sets and training data differ, so this comparison is indicative, not exact.
+The GNN serving artifact was re-exported from the new GNN (see section 3). The production model gives the GNN weight 0.0, so its scores and the numbers above are unchanged; the "GNN only" row is the earlier GNN.
+
+With the 5 recipient-history features from Feast, precision is 0.96 on this test sample. The test sets and training data differ, so this comparison is indicative, not exact.
 
 ## 5. Live streaming replay
 

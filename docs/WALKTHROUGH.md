@@ -277,7 +277,8 @@ python scripts/shared/train_shared_xgboost.py
 ```
 
 - Same 14 features (it takes the list from `models/fraud_xgboost_model.joblib`, so step 4 must have run).
-- **Writes:** `models/shared_fraud_xgboost_model.joblib` and `outputs/predictions/shared_xgb_test_predictions.csv`
+- Trains on 85% of `shared_train.csv`. The other 15% (`splits.shared_validation_split()`, the same rows for the GNN) is the **validation** set used in step 13.
+- **Writes:** `models/shared_fraud_xgboost_model.joblib`, `outputs/predictions/shared_xgb_validation_predictions.csv` and `shared_xgb_test_predictions.csv`
 
 ### Step 12. Train the GNN: `scripts/shared/train_shared_gnn.py`
 
@@ -289,7 +290,8 @@ python scripts/shared/train_shared_gnn.py           # a few minutes on CPU
   - `conv1`, `conv2`: two **GraphSAGE** layers. Each account's vector is updated by averaging its neighbours' vectors, twice, so it "sees" two hops away.
   - `classifier`: a small neural network that scores a transaction from [sender embedding, recipient embedding, 6 scaled transaction numbers].
 - **Training:** 15 epochs, Adam optimizer, a weighted loss for the rare fraud class.
-- **Writes:** `models/shared_fraud_gnn_model.pt` (weights + account-ID map + scaler) and `shared_gnn_test_predictions.csv`
+- **No edge shortcut:** a transaction is never in the graph used to compute its own accounts' embeddings. Each epoch splits the training transactions 70/30 into "graph" edges and "scored" edges, and accounts with no graph edge get zero embeddings, exactly like unseen accounts at test time. The old method (every transaction in its own graph) is trained too, and the one with the better validation average precision is kept → the new "disjoint" method (0.316 vs 0.310).
+- **Writes:** `models/shared_fraud_gnn_model.pt` (weights + account-ID map + scaler), `outputs/reports/shared_gnn_strategy_comparison.csv` and the validation and test predictions
 
 ### Step 13. Compare and blend: `scripts/shared/blend_shared_models.py`
 
@@ -297,11 +299,12 @@ python scripts/shared/train_shared_gnn.py           # a few minutes on CPU
 python scripts/shared/blend_shared_models.py
 ```
 
-- Checks that both prediction files describe the same rows in the same order (`transaction_index`).
-- Tries `score = w × XGBoost + (1 − w) × GNN` for several weights.
-- **Writes:** `outputs/reports/shared_blend_comparison.csv`
+- Checks that both models' prediction files describe the same rows in the same order (`transaction_index`).
+- Tries `score = w × XGBoost + (1 − w) × GNN` for 6 weights × 19 thresholds **on the validation set only**, and keeps the best F1. Validation rows are weighted back to the real fraud rate (the training file is ~6% fraud, real data 0.13%).
+- Only then scores the test set, once, with the chosen weight and threshold.
+- **Writes:** `outputs/reports/shared_blend_validation_selection.csv`, `shared_blend_test_results.csv`, a PR curve and a confusion matrix in `outputs/figures/`
 
-**Result:** XGBoost alone: average precision 0.998. GNN alone: 0.32. **What this tells us:** in PaySim most accounts appear only once, so the graph has very little structure to learn from. The GNN adds little here. It would matter more on real bank data with repeat customers. This is an honest and useful finding to present.
+**Result:** validation picks XGBoost weight 1.0 (GNN 0) and threshold 0.95. On the test set (1.27M transactions, 1,643 frauds): average precision 0.9986, precision 0.973, recall 0.998, with 46 false alarms and 4 missed frauds. GNN alone: average precision 0.32. **What this tells us:** in PaySim most accounts appear only once, so the graph has very little structure to learn from. The GNN adds little here. It would matter more on real bank data with repeat customers. This is an honest and useful finding to present.
 
 ---
 

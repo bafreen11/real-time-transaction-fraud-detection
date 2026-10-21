@@ -16,10 +16,12 @@ from fraud_detection.config import (
     SHARED_TEST_PATH as TEST_PATH,
     SHARED_TRAIN_PATH as TRAIN_PATH,
     SHARED_XGB_PREDICTIONS_PATH as PREDICTIONS_PATH,
+    SHARED_XGB_VALIDATION_PREDICTIONS_PATH as VALIDATION_PREDICTIONS_PATH,
     SHARED_XGBOOST_MODEL_PATH as MODEL_PATH,
     XGBOOST_MODEL_PATH,
     ensure_output_dirs,
 )
+from fraud_detection.data.splits import shared_validation_split
 from fraud_detection.features.engineering import create_features
 
 print("Loading shared training and test data...")
@@ -49,8 +51,19 @@ if missing_train or missing_test:
         f"missing test features: {missing_test}"
     )
 
-X_train = train_features_df[feature_columns]
-y_train = train_df["isFraud"].astype(int)
+# Hold out the same validation rows as train_shared_gnn.py. They are
+# used by blend_shared_models.py to choose the blend weight and
+# threshold, so neither model may train on them.
+fit_rows, val_rows = shared_validation_split(train_df["isFraud"])
+
+X_all = train_features_df[feature_columns]
+y_all = train_df["isFraud"].astype(int)
+
+X_train = X_all.iloc[fit_rows]
+y_train = y_all.iloc[fit_rows]
+
+X_val = X_all.iloc[val_rows]
+y_val = y_all.iloc[val_rows].to_numpy()
 
 X_test = test_features_df[feature_columns]
 y_test = test_df["isFraud"].astype(int).to_numpy()
@@ -61,6 +74,8 @@ scale_pos_weight = negative_count / positive_count
 
 print("Training rows:", len(X_train))
 print("Training fraud cases:", positive_count)
+print("Validation rows:", len(X_val))
+print("Validation fraud cases:", int(y_val.sum()))
 print("Test rows:", len(X_test))
 print("Test fraud cases:", int(y_test.sum()))
 print("Scale positive weight:", scale_pos_weight)
@@ -80,7 +95,8 @@ model = XGBClassifier(
 print("\nTraining shared XGBoost model...")
 model.fit(X_train, y_train)
 
-print("Scoring shared test transactions...")
+print("Scoring validation and shared test transactions...")
+val_probabilities = model.predict_proba(X_val)[:, 1]
 probabilities = model.predict_proba(X_test)[:, 1]
 predictions = (probabilities >= 0.5).astype(int)
 
@@ -115,6 +131,13 @@ joblib.dump(
     MODEL_PATH,
 )
 
+# transaction_index = row position in shared_train.csv
+pd.DataFrame({
+    "transaction_index": val_rows,
+    "isFraud": y_val,
+    "xgboost_probability": val_probabilities,
+}).to_csv(VALIDATION_PREDICTIONS_PATH, index=False)
+
 # Row positions match shared_test.csv and the shared GNN output.
 pd.DataFrame({
     "transaction_index": np.arange(len(test_df)),
@@ -123,5 +146,6 @@ pd.DataFrame({
 }).to_csv(PREDICTIONS_PATH, index=False)
 
 print("\nSaved model:", MODEL_PATH)
-print("Saved predictions:", PREDICTIONS_PATH)
+print("Saved validation predictions:", VALIDATION_PREDICTIONS_PATH)
+print("Saved test predictions:", PREDICTIONS_PATH)
 print("Shared XGBoost training and evaluation finished.")

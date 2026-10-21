@@ -34,22 +34,35 @@ SERIES_STYLES = [
 ]
 
 
-def threshold_metrics(y_true, scores, threshold):
-    """AP, precision, recall, F1 and TN/FP/FN/TP at one threshold."""
+def threshold_metrics(y_true, scores, threshold, sample_weight=None):
+    """AP, precision, recall, F1 and TN/FP/FN/TP at one threshold.
+
+    With sample_weight the counts are weighted estimates (floats).
+    """
     predictions = (np.asarray(scores) >= threshold).astype(int)
-    tn, fp, fn, tp = confusion_matrix(
-        y_true, predictions, labels=[0, 1]
-    ).ravel()
+    weights = {"sample_weight": sample_weight}
+    tn, fp, fn, tp = (
+        int(count) if sample_weight is None else round(float(count), 1)
+        for count in confusion_matrix(
+            y_true, predictions, labels=[0, 1], **weights
+        ).ravel()
+    )
     return {
         "threshold": float(threshold),
-        "average_precision": average_precision_score(y_true, scores),
-        "precision": precision_score(y_true, predictions, zero_division=0),
-        "recall": recall_score(y_true, predictions, zero_division=0),
-        "f1": f1_score(y_true, predictions, zero_division=0),
-        "true_negatives": int(tn),
-        "false_positives": int(fp),
-        "false_negatives": int(fn),
-        "true_positives": int(tp),
+        "average_precision": average_precision_score(
+            y_true, scores, **weights
+        ),
+        "precision": precision_score(
+            y_true, predictions, zero_division=0, **weights
+        ),
+        "recall": recall_score(
+            y_true, predictions, zero_division=0, **weights
+        ),
+        "f1": f1_score(y_true, predictions, zero_division=0, **weights),
+        "true_negatives": tn,
+        "false_positives": fp,
+        "false_negatives": fn,
+        "true_positives": tp,
     }
 
 
@@ -100,7 +113,10 @@ def plot_pr_curves(curves, path, title, operating_point=None):
     ax.set_ylabel("Precision (share of alerts that are fraud)",
                   color=TEXT_PRIMARY)
     ax.set_title(title, color=TEXT_PRIMARY, loc="left")
-    ax.legend(loc="lower left", frameon=False, labelcolor=TEXT_PRIMARY)
+    # The middle right is empty for good models (curves hug the top and
+    # the right edge).
+    ax.legend(loc="center right", bbox_to_anchor=(0.96, 0.5),
+              frameon=False, labelcolor=TEXT_PRIMARY)
 
     fig.tight_layout()
     fig.savefig(path, dpi=200, facecolor=SURFACE)
