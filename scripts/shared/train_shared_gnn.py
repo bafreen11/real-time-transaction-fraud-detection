@@ -16,11 +16,47 @@ from fraud_detection.config import (
     RANDOM_STATE,
     SHARED_GNN_MODEL_PATH as MODEL_PATH,
     SHARED_GNN_PREDICTIONS_PATH as PREDICTIONS_PATH,
+    SHARED_GNN_STRATEGY_COMPARISON_PATH as STRATEGY_COMPARISON_PATH,
+    SHARED_GNN_VALIDATION_PREDICTIONS_PATH as VALIDATION_PREDICTIONS_PATH,
     SHARED_GRAPH_TRANSACTIONS_PATH as TRAIN_PATH,
     SHARED_TEST_PATH as TEST_PATH,
     ensure_output_dirs,
 )
-from fraud_detection.models.gnn import FraudGNN
+from fraud_detection.data.splits import (
+    shared_validation_split,
+    shared_validation_weights,
+)
+from fraud_detection.models.gnn import (
+    FraudGNN,
+    account_count_features,
+    message_edge_index,
+)
+from fraud_detection.models.gnn_serving import (
+    GNN_EDGE_FEATURE_COLUMNS,
+    prepare_gnn_edge_features,
+)
+
+# --------------------------------------------------
+# Edge rules for message passing
+# --------------------------------------------------
+# 1. A transaction being scored is never in the graph used to compute
+#    its accounts' embeddings. With the "disjoint" strategy, each epoch
+#    splits the fit transactions at random into message edges
+#    (MESSAGE_EDGE_FRACTION) and supervision edges; the loss uses only
+#    supervision edges.
+# 2. Node features (log sender/recipient counts) are counted over the
+#    message edges only.
+# 3. Accounts with no message edge get zero embeddings, as unseen
+#    accounts do at test time.
+# 4. Validation and test transactions never enter message passing
+#    during training. Validation is scored on the graph of fit edges,
+#    test on the graph of all training edges. Labels are never features.
+#
+# The "transductive" strategy (the original approach: every fit edge is
+# both a message and a supervision edge) is trained for comparison. The
+# strategy with the higher validation average precision is kept.
+# Validation metrics are weighted to the natural fraud rate
+# (splits.shared_validation_weights); shared_train.csv is ~6% fraud.
 
 # --------------------------------------------------
 # 1. Configuration
@@ -29,8 +65,9 @@ from fraud_detection.models.gnn import FraudGNN
 EPOCHS = 15
 LEARNING_RATE = 0.003
 HIDDEN_CHANNELS = 32
+MESSAGE_EDGE_FRACTION = 0.7
+STRATEGIES = ["disjoint", "transductive"]
 
-torch.manual_seed(RANDOM_STATE)
 device = torch.device("cpu")
 
 print("Training device:", device)
@@ -45,10 +82,15 @@ test_df = pd.read_csv(TEST_PATH)
 train_df["isFraud"] = train_df["isFraud"].astype(int)
 test_df["isFraud"] = test_df["isFraud"].astype(int)
 
-print("Training transactions:", len(train_df))
-print("Test transactions:", len(test_df))
-print("Training fraud:", int(train_df["isFraud"].sum()))
-print("Test fraud:", int(test_df["isFraud"].sum()))
+# Same validation rows as train_shared_xgboost.py
+fit_rows, val_rows = shared_validation_split(train_df["isFraud"])
+
+print("Fit transactions:", len(fit_rows),
+      "| fraud:", int(train_df["isFraud"].iloc[fit_rows].sum()))
+print("Validation transactions:", len(val_rows),
+      "| fraud:", int(train_df["isFraud"].iloc[val_rows].sum()))
+print("Test transactions:", len(test_df),
+      "| fraud:", int(test_df["isFraud"].sum()))
 
 # --------------------------------------------------
 # 3. Build account IDs using training data only
@@ -65,133 +107,43 @@ account_to_id = {
 
 num_nodes = len(all_accounts)
 
-train_df["source_id"] = train_df["nameOrig"].map(account_to_id)
-train_df["target_id"] = train_df["nameDest"].map(account_to_id)
+train_sources = train_df["nameOrig"].map(account_to_id).to_numpy()
+train_targets = train_df["nameDest"].map(account_to_id).to_numpy()
 
 # Test accounts absent from training are mapped to -1.
 # These accounts receive zero node embeddings at prediction time.
-test_df["source_id"] = (
-    test_df["nameOrig"].map(account_to_id).fillna(-1).astype(int)
+test_sources = (
+    test_df["nameOrig"].map(account_to_id).fillna(-1).astype(int).to_numpy()
 )
-test_df["target_id"] = (
-    test_df["nameDest"].map(account_to_id).fillna(-1).astype(int)
-)
-
-# --------------------------------------------------
-# 4. Build node features from training transactions only
-# --------------------------------------------------
-
-sender_counts = (
-    train_df["source_id"]
-    .value_counts()
-    .reindex(range(num_nodes), fill_value=0)
-    .sort_index()
-)
-
-recipient_counts = (
-    train_df["target_id"]
-    .value_counts()
-    .reindex(range(num_nodes), fill_value=0)
-    .sort_index()
-)
-
-node_features = torch.tensor(
-    np.log1p(
-        np.column_stack([
-            sender_counts.to_numpy(),
-            recipient_counts.to_numpy(),
-        ])
-    ),
-    dtype=torch.float32,
-    device=device,
+test_targets = (
+    test_df["nameDest"].map(account_to_id).fillna(-1).astype(int).to_numpy()
 )
 
 # --------------------------------------------------
-# 5. Prepare transaction features
+# 4. Prepare transaction (edge) features
 # --------------------------------------------------
 
-edge_feature_columns = [
-    "step",
-    "amount",
-    "oldbalanceOrg",
-    "newbalanceOrig",
-    "oldbalanceDest",
-    "newbalanceDest",
-]
+edge_feature_columns = GNN_EDGE_FEATURE_COLUMNS
 
-log_columns = [
-    "amount",
-    "oldbalanceOrg",
-    "newbalanceOrig",
-    "oldbalanceDest",
-    "newbalanceDest",
-]
-
-def prepare_edge_features(df):
-    features = df[edge_feature_columns].copy()
-
-    for col in log_columns:
-        features[col] = np.log1p(
-            features[col].clip(lower=0)
-        )
-
-    return features
-
-train_raw_features = prepare_edge_features(train_df)
-test_raw_features = prepare_edge_features(test_df)
-
+# The scaler is fitted on fit transactions only.
 scaler = StandardScaler()
-train_features = scaler.fit_transform(train_raw_features)
-test_features = scaler.transform(test_raw_features)
+scaler.fit(prepare_gnn_edge_features(train_df.iloc[fit_rows]))
 
 train_features = torch.tensor(
-    train_features, dtype=torch.float32, device=device
+    scaler.transform(prepare_gnn_edge_features(train_df)),
+    dtype=torch.float32, device=device,
 )
 test_features = torch.tensor(
-    test_features, dtype=torch.float32, device=device
-)
-
-# --------------------------------------------------
-# 6. Build message-passing graph from training edges
-# --------------------------------------------------
-
-train_edge_index = torch.tensor(
-    train_df[["source_id", "target_id"]].to_numpy().T,
-    dtype=torch.long,
-    device=device,
-)
-
-message_edge_index = torch.cat(
-    [train_edge_index, train_edge_index.flip(0)],
-    dim=1,
-)
-
-# --------------------------------------------------
-# 7. Create GraphSAGE edge classifier
-# --------------------------------------------------
-
-model = FraudGNN(
-    2, HIDDEN_CHANNELS, len(edge_feature_columns)
-).to(device)
-optimizer = torch.optim.Adam(
-    model.parameters(), lr=LEARNING_RATE
-)
-
-train_sources = torch.tensor(
-    train_df["source_id"].to_numpy(),
-    dtype=torch.long, device=device,
-)
-train_targets = torch.tensor(
-    train_df["target_id"].to_numpy(),
-    dtype=torch.long, device=device,
-)
-y_train = torch.tensor(
-    train_df["isFraud"].to_numpy(),
+    scaler.transform(prepare_gnn_edge_features(test_df)),
     dtype=torch.float32, device=device,
 )
 
-positive_count = float(y_train.sum())
-negative_count = float(len(y_train) - positive_count)
+y_train = torch.tensor(
+    train_df["isFraud"].to_numpy(), dtype=torch.float32, device=device
+)
+
+positive_count = float(y_train[fit_rows].sum())
+negative_count = float(len(fit_rows) - positive_count)
 
 pos_weight = torch.tensor(
     [negative_count / max(positive_count, 1)],
@@ -204,95 +156,172 @@ print("Account nodes:", num_nodes)
 print("Positive-class weight:", pos_weight.item())
 
 # --------------------------------------------------
-# 8. Train
+# 5. Training and scoring
 # --------------------------------------------------
 
-for epoch in range(1, EPOCHS + 1):
-    model.train()
-    optimizer.zero_grad()
 
-    embeddings = model.encode(
-        node_features, message_edge_index
-    )
+def graph_from(rows):
+    """Node features, message edges and known-node mask built from the
+    given training rows only."""
+    node_features = account_count_features(
+        train_sources[rows], train_targets[rows], num_nodes
+    ).to(device)
+    edges = message_edge_index(
+        train_sources[rows], train_targets[rows]
+    ).to(device)
+    known_nodes = node_features.sum(dim=1) > 0
+    return node_features, edges, known_nodes
 
-    logits = model.predict_edges(
-        embeddings,
-        train_sources,
-        train_targets,
-        train_features,
-    )
 
-    loss = loss_function(logits, y_train)
-    loss.backward()
-    optimizer.step()
+def train_gnn(strategy):
+    torch.manual_seed(RANDOM_STATE)
+    rng = np.random.default_rng(RANDOM_STATE)
 
-    print(
-        f"Epoch {epoch:02d}/{EPOCHS} "
-        f"| Training loss: {loss.item():.4f}"
-    )
+    model = FraudGNN(
+        2, HIDDEN_CHANNELS, len(edge_feature_columns)
+    ).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+    print(f"\nTraining strategy: {strategy}")
+
+    for epoch in range(1, EPOCHS + 1):
+        if strategy == "disjoint":
+            shuffled = rng.permutation(fit_rows)
+            message_count = int(len(shuffled) * MESSAGE_EDGE_FRACTION)
+            message_rows = shuffled[:message_count]
+            supervision_rows = shuffled[message_count:]
+        else:
+            message_rows = fit_rows
+            supervision_rows = fit_rows
+
+        node_features, edges, known_nodes = graph_from(message_rows)
+        supervision = torch.tensor(supervision_rows, device=device)
+
+        model.train()
+        optimizer.zero_grad()
+
+        embeddings = model.encode(node_features, edges)
+        logits = model.predict_edges(
+            embeddings,
+            torch.tensor(train_sources[supervision_rows], device=device),
+            torch.tensor(train_targets[supervision_rows], device=device),
+            train_features[supervision],
+            known_nodes,
+        )
+
+        loss = loss_function(logits, y_train[supervision])
+        loss.backward()
+        optimizer.step()
+
+        print(
+            f"Epoch {epoch:02d}/{EPOCHS} "
+            f"| Training loss: {loss.item():.4f}"
+        )
+
+    return model
+
+
+def score(model, message_rows, sources, targets, edge_features):
+    """Fraud probabilities for edges that are not in message_rows."""
+    node_features, edges, known_nodes = graph_from(message_rows)
+
+    model.eval()
+    with torch.no_grad():
+        embeddings = model.encode(node_features, edges)
+        logits = model.predict_edges(
+            embeddings,
+            torch.tensor(sources, device=device),
+            torch.tensor(targets, device=device),
+            edge_features,
+            known_nodes,
+        )
+    return torch.sigmoid(logits).cpu().numpy()
+
+
+def metrics(y_true, probabilities, threshold=0.5, sample_weight=None):
+    predictions = (probabilities >= threshold).astype(int)
+    weights = {"sample_weight": sample_weight}
+    return {
+        "average_precision": average_precision_score(
+            y_true, probabilities, **weights
+        ),
+        "precision": precision_score(
+            y_true, predictions, zero_division=0, **weights
+        ),
+        "recall": recall_score(
+            y_true, predictions, zero_division=0, **weights
+        ),
+        "f1": f1_score(y_true, predictions, zero_division=0, **weights),
+    }
+
 
 # --------------------------------------------------
-# 9. Predict held-out test transactions
+# 6. Compare strategies on the validation set
 # --------------------------------------------------
 
-# Map unknown accounts to a safe index temporarily.
-# Their embeddings are replaced with zeros below.
-test_sources_np = test_df["source_id"].to_numpy()
-test_targets_np = test_df["target_id"].to_numpy()
+y_val = train_df["isFraud"].to_numpy()[val_rows]
+val_weights = shared_validation_weights(y_val)
+val_features = train_features[torch.tensor(val_rows, device=device)]
 
-known_source = test_sources_np >= 0
-known_target = test_targets_np >= 0
+models = {}
+val_probabilities = {}
+comparison = []
 
-safe_sources = torch.tensor(
-    np.maximum(test_sources_np, 0),
-    dtype=torch.long, device=device,
+for strategy in STRATEGIES:
+    models[strategy] = train_gnn(strategy)
+    val_probabilities[strategy] = score(
+        models[strategy],
+        fit_rows,
+        train_sources[val_rows],
+        train_targets[val_rows],
+        val_features,
+    )
+    comparison.append({
+        "strategy": strategy,
+        **{
+            f"val_{name}": value
+            for name, value in metrics(
+                y_val, val_probabilities[strategy],
+                sample_weight=val_weights,
+            ).items()
+        },
+    })
+
+comparison_df = pd.DataFrame(comparison)
+
+print("\n========== GNN STRATEGY COMPARISON "
+      "(VALIDATION, WEIGHTED TO THE NATURAL FRAUD RATE) ==========")
+print(comparison_df.to_string(
+    index=False, float_format=lambda value: f"{value:.6f}"
+))
+
+selected = comparison_df.loc[
+    comparison_df["val_average_precision"].idxmax(), "strategy"
+]
+comparison_df["selected"] = comparison_df["strategy"] == selected
+print("Selected strategy (highest validation AP):", selected)
+
+model = models[selected]
+
+# --------------------------------------------------
+# 7. Predict held-out test transactions
+# --------------------------------------------------
+
+# All training transactions form the graph; test edges are never in it.
+test_probabilities = score(
+    model,
+    np.arange(len(train_df)),
+    test_sources,
+    test_targets,
+    test_features,
 )
-safe_targets = torch.tensor(
-    np.maximum(test_targets_np, 0),
-    dtype=torch.long, device=device,
-)
-
-model.eval()
-
-with torch.no_grad():
-    embeddings = model.encode(
-        node_features, message_edge_index
-    )
-
-    source_embeddings = embeddings[safe_sources].clone()
-    target_embeddings = embeddings[safe_targets].clone()
-
-    source_embeddings[~torch.tensor(known_source, device=device)] = 0
-    target_embeddings[~torch.tensor(known_target, device=device)] = 0
-
-    combined = torch.cat(
-        [source_embeddings, target_embeddings, test_features],
-        dim=1,
-    )
-
-    test_logits = model.classifier(combined).squeeze(1)
-    test_probabilities = torch.sigmoid(test_logits).cpu().numpy()
 
 y_test = test_df["isFraud"].to_numpy()
 y_pred = (test_probabilities >= 0.5).astype(int)
 
-print("\n========== SHARED TEST RESULTS ==========")
-print(
-    "Average precision:",
-    average_precision_score(y_test, test_probabilities),
-)
-print(
-    "Fraud precision:",
-    precision_score(y_test, y_pred, zero_division=0),
-)
-print(
-    "Fraud recall:",
-    recall_score(y_test, y_pred, zero_division=0),
-)
-print(
-    "Fraud F1:",
-    f1_score(y_test, y_pred, zero_division=0),
-)
+print("\n========== SHARED TEST RESULTS (selected strategy) ==========")
+for name, value in metrics(y_test, test_probabilities).items():
+    print(f"{name}: {value:.6f}")
 print("Confusion matrix:")
 print(confusion_matrix(y_test, y_pred))
 
@@ -306,14 +335,22 @@ torch.save(
         "scaler": scaler,
         "edge_feature_columns": edge_feature_columns,
         "hidden_channels": HIDDEN_CHANNELS,
+        "training_strategy": selected,
     },
     MODEL_PATH,
 )
 
+comparison_df.to_csv(STRATEGY_COMPARISON_PATH, index=False)
+
+# transaction_index = row position in shared_train.csv
+pd.DataFrame({
+    "transaction_index": val_rows,
+    "isFraud": y_val,
+    "gnn_fraud_probability": val_probabilities[selected],
+}).to_csv(VALIDATION_PREDICTIONS_PATH, index=False)
+
 # Preserve the original test row position so the XGBoost
 # and GNN outputs can be aligned exactly.
-test_df.reset_index(drop=True, inplace=True)
-
 pd.DataFrame({
     "transaction_index": np.arange(len(test_df)),
     "isFraud": y_test,
@@ -321,5 +358,7 @@ pd.DataFrame({
 }).to_csv(PREDICTIONS_PATH, index=False)
 
 print("\nSaved GNN model:", MODEL_PATH)
-print("Saved GNN predictions:", PREDICTIONS_PATH)
+print("Saved strategy comparison:", STRATEGY_COMPARISON_PATH)
+print("Saved GNN validation predictions:", VALIDATION_PREDICTIONS_PATH)
+print("Saved GNN test predictions:", PREDICTIONS_PATH)
 print("Shared GNN training and evaluation finished.")

@@ -11,6 +11,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 from fraud_detection.config import (
+    PAYSIM_LEGITIMATE_ROWS,
     BASELINE_SAMPLE_FRACTION,
     BASELINE_TEST_FRACTION,
     BASELINE_VALIDATION_FRACTION_OF_TRAIN,
@@ -127,3 +128,20 @@ def shared_validation_split(labels):
         random_state=RANDOM_STATE,
     )
     return np.sort(fit_positions), np.sort(validation_positions)
+
+
+def shared_validation_weights(labels):
+    """Sample weights that restore the natural fraud rate.
+
+    shared_train.csv keeps every fraud row of the training partition
+    but only SHARED_TRAIN_LEGITIMATE_SAMPLE of its legitimate rows (a
+    uniform random sample), so its validation rows are ~6% fraud
+    against 0.13% in reality. Precision, F1 and average precision
+    depend on that rate, so validation metrics weight each legitimate
+    row by the number of legitimate partition rows it stands for (~51).
+    """
+    partition_legitimate = PAYSIM_LEGITIMATE_ROWS - round(
+        PAYSIM_LEGITIMATE_ROWS * SHARED_TEST_FRACTION
+    )
+    legitimate_weight = partition_legitimate / SHARED_TRAIN_LEGITIMATE_SAMPLE
+    return np.where(np.asarray(labels) == 1, 1.0, legitimate_weight)

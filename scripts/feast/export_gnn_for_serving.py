@@ -11,7 +11,11 @@ from fraud_detection.config import (
     SHARED_TEST_PATH,
     ensure_output_dirs,
 )
-from fraud_detection.models.gnn import FraudGNN
+from fraud_detection.models.gnn import (
+    FraudGNN,
+    account_count_features,
+    message_edge_index,
+)
 from fraud_detection.models.gnn_serving import GNNServingScorer
 
 CHECK_ROWS = 20_000
@@ -31,7 +35,8 @@ model.load_state_dict(checkpoint["model_state_dict"])
 model.eval()
 
 # --------------------------------------------------
-# 2. Rebuild the training graph exactly as train_shared_gnn.py does
+# 2. Rebuild the test-time graph exactly as train_shared_gnn.py does:
+#    all training transactions are message edges
 # --------------------------------------------------
 
 train_df = pd.read_csv(
@@ -42,19 +47,11 @@ num_nodes = len(account_to_id)
 source_ids = train_df["nameOrig"].map(account_to_id).to_numpy()
 target_ids = train_df["nameDest"].map(account_to_id).to_numpy()
 
-counts = np.column_stack([
-    np.bincount(source_ids, minlength=num_nodes),
-    np.bincount(target_ids, minlength=num_nodes),
-])
-node_features = torch.tensor(np.log1p(counts), dtype=torch.float32)
-
-edge_index = torch.tensor(
-    np.vstack([source_ids, target_ids]), dtype=torch.long
-)
-message_edge_index = torch.cat([edge_index, edge_index.flip(0)], dim=1)
+node_features = account_count_features(source_ids, target_ids, num_nodes)
+edges = message_edge_index(source_ids, target_ids)
 
 with torch.no_grad():
-    embeddings = model.encode(node_features, message_edge_index).numpy()
+    embeddings = model.encode(node_features, edges).numpy()
 
 print("Account embeddings:", embeddings.shape)
 

@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -34,10 +35,25 @@ class FraudGNN(nn.Module):
         return x
 
     def predict_edges(
-        self, embeddings, source_ids, target_ids, edge_features
+        self, embeddings, source_ids, target_ids, edge_features,
+        known_nodes=None,
     ):
-        source_embedding = embeddings[source_ids]
-        target_embedding = embeddings[target_ids]
+        """Edge logits from sender/recipient embeddings and edge features.
+
+        known_nodes is an optional boolean tensor over all nodes. Accounts
+        that are not known, and ids of -1, get zero embeddings: the same
+        treatment unseen accounts get at test time.
+        """
+        source_embedding = embeddings[source_ids.clamp(min=0)]
+        target_embedding = embeddings[target_ids.clamp(min=0)]
+
+        if known_nodes is not None:
+            source_embedding = source_embedding * _known_mask(
+                source_ids, known_nodes
+            )
+            target_embedding = target_embedding * _known_mask(
+                target_ids, known_nodes
+            )
 
         combined = torch.cat(
             [source_embedding, target_embedding, edge_features],
@@ -45,3 +61,26 @@ class FraudGNN(nn.Module):
         )
 
         return self.classifier(combined).squeeze(1)
+
+
+def _known_mask(ids, known_nodes):
+    known = (ids >= 0) & known_nodes[ids.clamp(min=0)]
+    return known.unsqueeze(1).to(torch.float32)
+
+
+def account_count_features(source_ids, target_ids, num_nodes):
+    """Node features: log1p of each account's sender and recipient counts
+    over the given edges, shape (num_nodes, 2)."""
+    counts = np.column_stack([
+        np.bincount(source_ids, minlength=num_nodes),
+        np.bincount(target_ids, minlength=num_nodes),
+    ])
+    return torch.tensor(np.log1p(counts), dtype=torch.float32)
+
+
+def message_edge_index(source_ids, target_ids):
+    """Undirected edge_index (both directions) for message passing."""
+    edge_index = torch.tensor(
+        np.vstack([source_ids, target_ids]), dtype=torch.long
+    )
+    return torch.cat([edge_index, edge_index.flip(0)], dim=1)

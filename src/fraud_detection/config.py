@@ -129,6 +129,11 @@ SHARED_TRAIN_LEGITIMATE_SAMPLE = 100_000
 # Stratified share of shared_train.csv held out as the validation set
 # for GNN strategy, blend weight and threshold selection.
 SHARED_VALIDATION_FRACTION = 0.15
+# Legitimate transactions in the full PaySim dataset. shared_train.csv
+# keeps only SHARED_TRAIN_LEGITIMATE_SAMPLE of them, so validation rows
+# are weighted back to the natural fraud rate (see
+# splits.shared_validation_weights).
+PAYSIM_LEGITIMATE_ROWS = 6_354_407
 # Blend candidates compared on that validation set
 SHARED_BLEND_XGB_WEIGHTS = [1.00, 0.90, 0.75, 0.50, 0.25, 0.00]
 SHARED_BLEND_THRESHOLDS = [round(0.05 * i, 2) for i in range(1, 20)]
