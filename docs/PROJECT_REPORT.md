@@ -1,7 +1,7 @@
 # Project report: real-time transaction fraud detection
 
 **Author:** [Your name] · **Internship:** [team / company] · **Date:** 21 October 2026
-**Repository:** https://github.com/bafreen11/fraud-detection-using-Python
+**Repository:** https://github.com/bafreen11/real-time-transaction-fraud-detection
 
 ## 1. Summary
 
