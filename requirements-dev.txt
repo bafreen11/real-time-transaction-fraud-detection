@@ -1,17 +1,39 @@
+# Development, training and analysis environment.
+# Tested on Windows 10 with Python 3.12.1 (64-bit). numpy 1.26.4 has no
+# wheels for Python 3.13+, so use Python 3.11 or 3.12.
+#
+# Install order (see README "Setup"):
+#   pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements-dev.txt
+#   pip install --no-deps pyarrow==25.0.1
+#   pip install -e .
+
 # API / serving dependencies
 -r requirements.txt
 
-# Analysis, training, tracking and streaming
-matplotlib
-mlflow
-torch
-torch_geometric
-kafka-python
-requests
+# Graph model. CPU build of torch (installed from the PyTorch CPU index
+# above). torch_geometric 2.8.1 needs no compiled extensions
+# (torch-scatter / torch-sparse) for the SAGEConv layers used here.
+torch==2.14.1
+torch_geometric==2.8.1
+
+# Analysis, tracking and streaming
+matplotlib==3.11.2
+mlflow==3.17.1
+kafka-python==3.0.11
+requests==2.34.2
 
 # Streaming track: feature store, drift monitoring, analyst dashboard.
 # feast 0.47 is the newest release that works with numpy<2, which the
-# pickled models above need.
+# pickled models above need. It asks for pyarrow<18.1, but pyarrow 18
+# breaks "import torch" on Windows after pandas is imported (WinError
+# 1114), so the environment is upgraded to pyarrow 25.0.1 afterwards
+# with --no-deps (Feast works with it; `pip check` reports this one
+# conflict). The torch-free service image keeps pyarrow 18.0.0.
 feast==0.47.0
 evidently==0.7.23
 streamlit==1.66.0
+
+# Tests (python -m pytest)
+pytest==9.1.1
+httpx==0.28.1
