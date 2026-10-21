@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-dashboard
+  namespace: fraud-detection
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: fraud-dashboard}
+  template:
+    metadata:
+      labels: {app: fraud-dashboard}
+    spec:
+      containers:
+        - name: dashboard
+          image: fraud-dashboard:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8501
+          env:
+            - {name: FRAUD_SERVICE_URL, value: "http://fraud-service:8001"}
+            # What the browser uses for links: a port-forward of
+            # fraud-service to local port 8001.
+            - {name: FRAUD_SERVICE_PUBLIC_URL, value: "http://127.0.0.1:8001"}
+          readinessProbe:
+            httpGet: {path: /_stcore/health, port: 8501}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: {memory: "256Mi", cpu: "100m"}
+            limits: {memory: "512Mi"}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-dashboard
+  namespace: fraud-detection
+spec:
+  type: NodePort
+  selector: {app: fraud-dashboard}
+  ports:
+    - port: 8501
+      targetPort: 8501
+      nodePort: 30501

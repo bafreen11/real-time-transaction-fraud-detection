@@ -1,0 +1,15 @@
+# Build context for Dockerfile.service: only what the image copies.
+*
+!requirements.txt
+!requirements-service.txt
+!src/
+!api/
+!streaming/kafka_replay_producer.py
+!scripts/monitoring/
+!feature_repo/feature_store.yaml
+!feature_repo/definitions.py
+!models/stream_xgboost_model.joblib
+!models/gnn_serving_artifact.joblib
+!data/processed/drift_reference_features.parquet
+**/__pycache__/
+**/*.egg-info/

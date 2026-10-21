@@ -1,0 +1,75 @@
+# Streaming fraud service: Kafka consumer + Feast + blended model + cases API.
+# One volume holds all mutable state (Feast online store and registry,
+# case database, drift reports, MLflow runs). The drift CronJob mounts it too.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fraud-state
+  namespace: fraud-detection
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fraud-config
+  namespace: fraud-detection
+data:
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  SERVING_DB_PATH: "/app/data/serving/fraud_cases.db"
+  MLFLOW_TRACKING_URI: "sqlite:////app/mlflow/mlflow.db"
+  FRAUD_SERVICE_URL: "http://fraud-service:8001"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-service
+  namespace: fraud-detection
+spec:
+  replicas: 1  # single writer for the SQLite stores and the consumer group
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: fraud-service}
+  template:
+    metadata:
+      labels: {app: fraud-service}
+    spec:
+      containers:
+        - name: fraud-service
+          image: fraud-service:latest
+          imagePullPolicy: Never   # built inside Minikube's Docker
+          ports:
+            - containerPort: 8001
+          envFrom:
+            - configMapRef: {name: fraud-config}
+          volumeMounts:
+            - {name: state, mountPath: /app/feature_repo/data, subPath: feast}
+            - {name: state, mountPath: /app/data/serving, subPath: serving}
+            - {name: state, mountPath: /app/outputs/reports/drift, subPath: drift}
+            - {name: state, mountPath: /app/mlflow, subPath: mlflow}
+          readinessProbe:
+            httpGet: {path: /, port: 8001}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests: {memory: "512Mi", cpu: "250m"}
+            limits: {memory: "2Gi"}
+      volumes:
+        - name: state
+          persistentVolumeClaim: {claimName: fraud-state}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-service
+  namespace: fraud-detection
+spec:
+  type: NodePort
+  selector: {app: fraud-service}
+  ports:
+    - port: 8001
+      targetPort: 8001
+      nodePort: 30081

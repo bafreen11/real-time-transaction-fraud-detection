@@ -1,0 +1,4 @@
+# Analyst dashboard image (dashboard/app.py)
+streamlit==1.66.0
+pandas==2.2.3
+requests==2.34.2

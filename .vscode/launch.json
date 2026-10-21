@@ -1,0 +1,172 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "FastAPI (uvicorn :8000)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["api.fraud_api:app", "--host", "127.0.0.1", "--port", "8000"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "jinja": true,
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "MLflow UI (:5000)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "mlflow",
+      "args": ["ui", "--backend-store-uri", "sqlite:///mlflow.db", "--port", "5000"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "subProcess": false,
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Kafka consumer -> API",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/streaming/kafka_fraud_consumer.py",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Kafka producer (PaySim)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/streaming/kafka_paysim_producer.py",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "preLaunchTask": "wait: api ready",
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Fraud service (Feast + Kafka :8001)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["api.fraud_service:app", "--host", "127.0.0.1", "--port", "8001"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Analyst dashboard (Streamlit :8501)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "streamlit",
+      "args": ["run", "dashboard/app.py", "--server.port", "8501", "--server.headless", "true"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "FRAUD_SERVICE_URL": "http://127.0.0.1:8001",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "preLaunchTask": "wait: fraud service ready",
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Drift monitor (Evidently, every 5 min)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/monitoring/check_drift.py",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src",
+        "PYTHONUNBUFFERED": "1",
+        "DRIFT_CHECK_INTERVAL_SECONDS": "300",
+        "FRAUD_SERVICE_URL": "http://127.0.0.1:8001"
+      },
+      "preLaunchTask": "wait: fraud service ready",
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Replay producer (stream to fraud service)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/streaming/kafka_replay_producer.py",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src",
+        "PYTHONUNBUFFERED": "1",
+        "REPLAY_MAX_TRANSACTIONS": "2000",
+        "REPLAY_DELAY_SECONDS": "0.05"
+      },
+      "preLaunchTask": "wait: fraud service ready",
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Python: current file",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Run streaming platform (Feast + dashboard)",
+      "configurations": [
+        "Fraud service (Feast + Kafka :8001)",
+        "Analyst dashboard (Streamlit :8501)",
+        "MLflow UI (:5000)",
+        "Drift monitor (Evidently, every 5 min)",
+        "Replay producer (stream to fraud service)"
+      ],
+      "preLaunchTask": "docker: start kafka",
+      "stopAll": true
+    },
+    {
+   
+      "name": "Run everything (local API)",
+      "configurations": [
+        "FastAPI (uvicorn :8000)",
+        "MLflow UI (:5000)",
+        "Kafka consumer -> API",
+        "Kafka producer (PaySim)"
+      ],
+      "preLaunchTask": "docker: start kafka",
+      "stopAll": true
+    },
+    {
+      "name": "Run everything (API in Docker)",
+      "configurations": [
+        "MLflow UI (:5000)",
+        "Kafka consumer -> API",
+        "Kafka producer (PaySim)"
+      ],
+      "preLaunchTask": "docker: start kafka + api container",
+      "stopAll": true
+    }
+  ]
+}

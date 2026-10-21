@@ -1,0 +1,10 @@
+# Deploy everything except the on-demand replay producer:
+#   kubectl apply -k k8s/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - kafka.yaml
+  - fraud-service.yaml
+  - dashboard.yaml
+  - drift-cronjob.yaml

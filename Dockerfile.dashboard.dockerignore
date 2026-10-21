@@ -1,0 +1,4 @@
+*
+!requirements-dashboard.txt
+!dashboard/
+**/__pycache__/

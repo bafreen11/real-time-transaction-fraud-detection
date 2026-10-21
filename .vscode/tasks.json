@@ -1,0 +1,106 @@
+{
+  "version": "2.0.0",
+  "options": {
+    "cwd": "${workspaceFolder}"
+  },
+  "tasks": [
+    {
+      "label": "docker: start kafka",
+      "detail": "Start the Kafka broker and wait until it is healthy",
+      "type": "shell",
+      "command": "docker compose up -d --wait kafka",
+      "problemMatcher": []
+    },
+    {
+      "label": "docker: start kafka + api container",
+      "detail": "Build the fraud-api image and start it with Kafka, waiting for both to be healthy",
+      "type": "shell",
+      "command": "docker compose --profile docker-api up -d --build --wait",
+      "problemMatcher": []
+    },
+    {
+      "label": "docker: stop all",
+      "detail": "Stop and remove the Kafka and API containers",
+      "type": "shell",
+      "command": "docker compose --profile docker-api down",
+      "problemMatcher": []
+    },
+    {
+      "label": "wait: api ready",
+      "detail": "Poll the FastAPI service on port 8000 for up to 90 seconds",
+      "type": "shell",
+      "options": {
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoProfile", "-Command"]
+        }
+      },
+      "command": "for ($i = 0; $i -lt 90; $i++) { try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 http://127.0.0.1:8000/ | Out-Null; Write-Host 'API is up'; exit 0 } catch { Start-Sleep -Seconds 1 } }; Write-Error 'API did not start on port 8000'; exit 1",
+      "presentation": {
+        "reveal": "silent"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "wait: fraud service ready",
+      "detail": "Poll the streaming fraud service on port 8001 for up to 120 seconds",
+      "type": "shell",
+      "options": {
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoProfile", "-Command"]
+        }
+      },
+      "command": "for ($i = 0; $i -lt 120; $i++) { try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 http://127.0.0.1:8001/ | Out-Null; Write-Host 'Fraud service is up'; exit 0 } catch { Start-Sleep -Seconds 1 } }; Write-Error 'Fraud service did not start on port 8001'; exit 1",
+      "presentation": {
+        "reveal": "silent"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "setup: streaming track (feature store, GNN export, stream model)",
+      "detail": "One-time: build Feast store, export the GNN for serving, train the stream model",
+      "type": "shell",
+      "options": {
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}/src"
+        },
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoProfile", "-Command"]
+        }
+      },
+      "command": "& '${command:python.interpreterPath}' scripts/feast/build_feature_store.py; if ($?) { & '${command:python.interpreterPath}' scripts/feast/export_gnn_for_serving.py }; if ($?) { & '${command:python.interpreterPath}' scripts/feast/train_stream_model.py }",
+      "problemMatcher": []
+    },
+    {
+      "label": "setup: reset replay (rebuild Feast online store, clear cases)",
+      "detail": "Re-bootstrap the online store to REPLAY_START_STEP, delete scored cases, skip old Kafka messages; stop the fraud service first",
+      "type": "shell",
+      "options": {
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}/src"
+        },
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoProfile", "-Command"]
+        }
+      },
+      "command": "Remove-Item -Force -ErrorAction SilentlyContinue data/serving/fraud_cases.db*; docker exec fraud-kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --group paysim-fraud-service --topic transactions --reset-offsets --to-latest --execute; & '${command:python.interpreterPath}' scripts/feast/build_feature_store.py",
+      "problemMatcher": []
+    },
+    {
+      "label": "setup: install dependencies",
+      "detail": "Install dev requirements and the fraud_detection package into the selected interpreter",
+      "type": "shell",
+      "command": "& '${command:python.interpreterPath}' -m pip install -r requirements-dev.txt; & '${command:python.interpreterPath}' -m pip install -e .",
+      "options": {
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoProfile", "-Command"]
+        }
+      },
+      "problemMatcher": []
+    }
+  ]
+}

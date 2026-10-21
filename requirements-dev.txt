@@ -8,3 +8,10 @@ torch
 torch_geometric
 kafka-python
 requests
+
+# Streaming track: feature store, drift monitoring, analyst dashboard.
+# feast 0.47 is the newest release that works with numpy<2, which the
+# pickled models above need.
+feast==0.47.0
+evidently==0.7.23
+streamlit==1.66.0

@@ -1,0 +1,25 @@
+# 3.11 like the baseline image: joblib==1.2.0 (requirements.txt) imports
+# distutils, which Python 3.12 removed.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt requirements-service.txt ./
+RUN pip install --no-cache-dir -r requirements-service.txt
+
+# Keep the project layout so config.py resolves paths from /app
+COPY src/ ./src/
+COPY api/ ./api/
+COPY streaming/kafka_replay_producer.py ./streaming/
+COPY scripts/monitoring/ ./scripts/monitoring/
+COPY feature_repo/feature_store.yaml feature_repo/definitions.py ./feature_repo/
+COPY models/stream_xgboost_model.joblib models/gnn_serving_artifact.joblib ./models/
+COPY data/processed/drift_reference_features.parquet ./data/processed/
+
+ENV PYTHONPATH=/app/src \
+    PYTHONUNBUFFERED=1 \
+    FEAST_APPLY_ON_START=1
+
+EXPOSE 8001
+
+CMD ["uvicorn", "api.fraud_service:app", "--host", "0.0.0.0", "--port", "8001"]

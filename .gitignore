@@ -15,3 +15,9 @@ archive/legacy_graph_prototype/*.pt
 # Experiment tracking
 mlruns/
 mlflow.db
+
+# Streaming track local state
+feature_repo/data/
+data/serving/
+outputs/reports/drift/
+models/archive/

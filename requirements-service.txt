@@ -1,0 +1,10 @@
+# Streaming fraud service image (api/fraud_service.py), also used for the
+# drift-check CronJob and the replay producer Job. No torch: the GNN is
+# served from models/gnn_serving_artifact.joblib.
+-r requirements.txt
+feast==0.47.0
+pyarrow==18.0.0
+evidently==0.7.23
+kafka-python==3.0.11
+mlflow-skinny==3.17.1
+requests==2.34.2

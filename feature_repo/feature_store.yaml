@@ -1,0 +1,12 @@
+# Feast repository for the streaming track.
+# Paths are relative to this folder. data/ holds the offline parquet
+# source, the registry and the SQLite online store (not committed).
+project: paysim_fraud
+provider: local
+registry: data/registry.db
+online_store:
+  type: sqlite
+  path: data/online_store.db
+offline_store:
+  type: file
+entity_key_serialization_version: 3

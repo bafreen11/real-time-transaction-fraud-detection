@@ -1,0 +1,30 @@
+# Streams PaySim transactions into Kafka. Not part of kustomization.yaml:
+# run it on demand after mounting the data folder into Minikube:
+#   minikube mount E:\:/paysim          (keep this terminal open)
+#   kubectl apply -f k8s/replay-producer-job.yaml
+#   kubectl -n fraud-detection logs -f job/replay-producer
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: replay-producer
+  namespace: fraud-detection
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: producer
+          image: fraud-service:latest
+          imagePullPolicy: Never
+          command: ["python", "streaming/kafka_replay_producer.py"]
+          env:
+            - {name: KAFKA_BOOTSTRAP_SERVERS, value: "kafka:9092"}
+            - {name: PAYSIM_RAW_PATH, value: "/paysim/paysim.csv"}
+            - {name: REPLAY_MAX_TRANSACTIONS, value: "2000"}
+            - {name: REPLAY_DELAY_SECONDS, value: "0.05"}
+          volumeMounts:
+            - {name: paysim, mountPath: /paysim, readOnly: true}
+      volumes:
+        - name: paysim
+          hostPath: {path: /paysim, type: Directory}

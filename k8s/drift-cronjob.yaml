@@ -1,0 +1,42 @@
+# Evidently drift check every 30 minutes against the service case store.
+# RETRAIN_ON_DRIFT is off in the cluster: retraining needs the raw PaySim
+# data and the shared split, which stay on the host machine. Locally the
+# drift monitor retrains automatically (see README, Streaming platform).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: drift-check
+  namespace: fraud-detection
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          # Same node as fraud-service, required by the ReadWriteOnce volume.
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels: {app: fraud-service}
+                  topologyKey: kubernetes.io/hostname
+          containers:
+            - name: drift-check
+              image: fraud-service:latest
+              imagePullPolicy: Never
+              command: ["python", "scripts/monitoring/check_drift.py"]
+              envFrom:
+                - configMapRef: {name: fraud-config}
+              env:
+                - {name: RETRAIN_ON_DRIFT, value: "0"}
+              volumeMounts:
+                - {name: state, mountPath: /app/feature_repo/data, subPath: feast}
+                - {name: state, mountPath: /app/data/serving, subPath: serving}
+                - {name: state, mountPath: /app/outputs/reports/drift, subPath: drift}
+                - {name: state, mountPath: /app/mlflow, subPath: mlflow}
+          volumes:
+            - name: state
+              persistentVolumeClaim: {claimName: fraud-state}

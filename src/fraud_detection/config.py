@@ -5,6 +5,7 @@ artifacts only requires a change in this module.
 """
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 # --------------------------------------------------
@@ -102,9 +103,76 @@ MLFLOW_EXPERIMENT_NAME = "PaySim_Fraud_Detection"
 # Existing runs live in mlflow.db and their artifacts in mlruns/,
 # both at the project root. Do not move them: run records store
 # absolute artifact paths.
-MLFLOW_TRACKING_URI = (
-    "sqlite:///" + (PROJECT_ROOT / "mlflow.db").as_posix()
+MLFLOW_TRACKING_URI = os.environ.get(
+    "MLFLOW_TRACKING_URI",
+    "sqlite:///" + (PROJECT_ROOT / "mlflow.db").as_posix(),
 )
+
+# --------------------------------------------------
+# Streaming track: Feast feature store, stream model,
+# scoring service, drift monitoring
+# --------------------------------------------------
+
+# Feast repository (feature_store.yaml) and its local data
+# (offline parquet source, registry, SQLite online store).
+FEATURE_REPO_DIR = PROJECT_ROOT / "feature_repo"
+FEAST_DATA_DIR = FEATURE_REPO_DIR / "data"
+RECIPIENT_STATS_PATH = FEAST_DATA_DIR / "recipient_stats.parquet"
+
+# PaySim "step" is one simulated hour. Steps are mapped onto real
+# timestamps so Feast can do point-in-time joins.
+PAYSIM_START_TIME = datetime(2025, 1, 1, tzinfo=timezone.utc)
+
+STREAM_XGBOOST_MODEL_PATH = MODELS_DIR / "stream_xgboost_model.joblib"
+GNN_SERVING_ARTIFACT_PATH = MODELS_DIR / "gnn_serving_artifact.joblib"
+STREAM_MODEL_ARCHIVE_DIR = MODELS_DIR / "archive"
+
+# Sample of training features kept as the drift reference.
+DRIFT_REFERENCE_PATH = PROCESSED_DATA_DIR / "drift_reference_features.parquet"
+
+# Fraction of shared_test.csv scored when training the stream model.
+# Half of the sample picks the threshold and blend weight, the other
+# half is the untouched test set.
+STREAM_EVAL_FRACTION = float(os.environ.get("STREAM_EVAL_FRACTION", "0.25"))
+STREAM_BLEND_GNN_WEIGHTS = [0.0, 0.1, 0.25, 0.5]
+STREAM_THRESHOLDS = [round(0.05 * i, 2) for i in range(1, 20)]
+
+MLFLOW_STREAM_EXPERIMENT_NAME = "PaySim_Stream_Model"
+MLFLOW_DRIFT_EXPERIMENT_NAME = "PaySim_Drift_Monitoring"
+STREAM_MODEL_REGISTRY_NAME = "paysim-stream-xgboost"
+
+# Kafka
+KAFKA_BOOTSTRAP_SERVERS = os.environ.get(
+    "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
+)
+KAFKA_TRANSACTIONS_TOPIC = os.environ.get(
+    "KAFKA_TRANSACTIONS_TOPIC", "transactions"
+)
+KAFKA_ALERTS_TOPIC = os.environ.get("KAFKA_ALERTS_TOPIC", "fraud_alerts")
+KAFKA_SERVICE_GROUP_ID = "paysim-fraud-service"
+
+# Replay: the online store is bootstrapped with all history before
+# REPLAY_START_STEP, then the producer streams from that step on.
+REPLAY_START_STEP = int(os.environ.get("REPLAY_START_STEP", "600"))
+
+# Scoring service state (scored transactions, alert cases, feedback)
+SERVING_DATA_DIR = DATA_DIR / "serving"
+SERVING_DB_PATH = Path(
+    os.environ.get("SERVING_DB_PATH", SERVING_DATA_DIR / "fraud_cases.db")
+)
+
+# Drift monitoring and automatic retraining
+DRIFT_REPORTS_DIR = REPORTS_DIR / "drift"
+DRIFT_LATEST_SUMMARY_PATH = DRIFT_REPORTS_DIR / "latest_summary.json"
+DRIFT_LATEST_REPORT_PATH = DRIFT_REPORTS_DIR / "latest_report.html"
+RETRAIN_STATE_PATH = DRIFT_REPORTS_DIR / "retrain_state.json"
+DRIFT_WINDOW_SIZE = int(os.environ.get("DRIFT_WINDOW_SIZE", "2000"))
+DRIFT_MIN_ROWS = int(os.environ.get("DRIFT_MIN_ROWS", "500"))
+DRIFT_SHARE_THRESHOLD = float(os.environ.get("DRIFT_SHARE_THRESHOLD", "0.5"))
+RETRAIN_COOLDOWN_HOURS = float(os.environ.get("RETRAIN_COOLDOWN_HOURS", "12"))
+# Retrained model replaces the current one only if its test average
+# precision is at least the current model's minus this tolerance.
+RETRAIN_PROMOTION_TOLERANCE = 0.002
 
 
 def ensure_output_dirs():
@@ -115,5 +183,9 @@ def ensure_output_dirs():
         PREDICTIONS_DIR,
         REPORTS_DIR,
         FIGURES_DIR,
+        FEAST_DATA_DIR,
+        SERVING_DB_PATH.parent,
+        DRIFT_REPORTS_DIR,
+        STREAM_MODEL_ARCHIVE_DIR,
     ):
         directory.mkdir(parents=True, exist_ok=True)
