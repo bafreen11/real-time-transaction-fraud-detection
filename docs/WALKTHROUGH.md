@@ -122,9 +122,9 @@ python scripts/data/run_feature_engineering.py      # about 1-2 minutes, needs ~
 
 - **Uses:** `features/engineering.py` → `create_features()`
 - **Reads:** `E:\paysim.csv`
-- **Writes:** `E:\paysim_features.csv` (834 MB)
+- **Writes:** `E:\paysim_features.csv` (859 MB)
 
-A **feature** is a number the model learns from. The six raw numbers become 12 features:
+A **feature** is a number the model learns from. The six raw numbers and the transaction type become 14 features:
 
 | Feature | Formula | Why it helps |
 |---|---|---|
@@ -134,6 +134,7 @@ A **feature** is a number the model learns from. The six raw numbers become 12 f
 | `amount_to_origin_balance` | `amount / (oldbalanceOrg + 1)` | ≈ 1 means "sends everything" |
 | `amount_to_destination_balance` | `amount / (oldbalanceDest + 1)` | large amounts into empty accounts |
 | `step_day`, `step_hour` | `(step−1) // 24`, `(step−1) % 24` | time of day |
+| `type_TRANSFER`, `type_CASH_OUT` | 1 if the transaction has that type | PaySim fraud only happens in these two types. Added after `scripts/xgboost/compare_transaction_type.py` showed fewer false alarms on the validation set (3 instead of 12, no fraud missed) |
 
 **Important design rule:** `create_features()` is the **only** place these formulas exist. Training uses it, and the API uses it through `prepare_transaction()`. So the model always gets the same numbers in production as in training (this mismatch, "training/serving skew", is a classic bug in ML systems). The tests in `tests/test_features.py` check this.
 
@@ -172,17 +173,18 @@ python scripts/xgboost/validate_and_test_model.py
 The model outputs a probability, and the **threshold** turns it into a yes/no decision. If you choose the threshold by looking at the test set, the test result looks better than it really is (that's cheating, or "leakage"). So this script splits **70% train / 10% validation / 20% test**:
 
 1. Train on the 70%.
-2. Try thresholds 0.1 to 0.9 on the **validation** 10%, and keep the one with the best F1 → **0.4**.
+2. Try thresholds 0.1 to 0.9 on the **validation** 10%, and keep the one with the best F1 → **0.3**.
 3. Report the final numbers on the untouched **test** 20%.
 
-**Result (test set, 127,253 transactions, 164 frauds):** precision 0.870, recall 0.982, F1 0.923, average precision 0.986. Of the 164 frauds it catches 161, with 24 false alarms among 127,089 legitimate transactions.
+**Result (test set, 127,253 transactions, 164 frauds):** precision 0.937, recall 0.994, F1 0.964, average precision 0.992. Of the 164 frauds it catches 163, with 11 false alarms among 127,089 legitimate transactions.
 
 ### Step 6. Evaluation, threshold table, chart, MLflow
 
 ```powershell
 python scripts/xgboost/evaluate_model.py            # → outputs/reports/evaluation_results.txt
 python scripts/xgboost/threshold_analysis.py        # → outputs/reports/threshold_results.csv
-python scripts/xgboost/plot_confusion_matrix.py     # → outputs/figures/confusion_matrix.png
+python scripts/xgboost/plot_evaluation_figures.py   # served model → confusion_matrix.png (counts), pr_curve.png
+python scripts/xgboost/compare_transaction_type.py  # validation-only check: 12 features vs 12 + transaction type
 python scripts/xgboost/track_experiment.py          # → logs a run to MLflow (mlflow.db)
 ```
 
@@ -201,7 +203,7 @@ uvicorn api.fraud_api:app --port 8000
 ```
 
 - **File:** `api/fraud_api.py`
-- **What it does at start-up:** loads `fraud_xgboost_validated_model.joblib` (the model, the 12 feature names and threshold 0.4)
+- **What it does at start-up:** loads `fraud_xgboost_validated_model.joblib` (the model, the 14 feature names and threshold 0.3)
 - **Open:** http://127.0.0.1:8000/docs (an interactive page where you can try the API)
 
 Test it from a second PowerShell window:
@@ -209,16 +211,16 @@ Test it from a second PowerShell window:
 ```powershell
 # a real fraud from paysim.csv (row 3): a TRANSFER that empties the account
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/predict -ContentType "application/json" `
-  -Body '{"step":1,"amount":181,"oldbalanceOrg":181,"newbalanceOrig":0,"oldbalanceDest":0,"newbalanceDest":0}'
-# → fraud_probability 0.865, decision FRAUD_ALERT
+  -Body '{"step":1,"type":"TRANSFER","amount":181,"oldbalanceOrg":181,"newbalanceOrig":0,"oldbalanceDest":0,"newbalanceDest":0}'
+# → fraud_probability 0.9997, decision FRAUD_ALERT (the same amounts as a PAYMENT score 0.009)
 
 # a normal payment (row 1)
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/predict -ContentType "application/json" `
-  -Body '{"step":1,"amount":9839.64,"oldbalanceOrg":170136,"newbalanceOrig":160296.36,"oldbalanceDest":0,"newbalanceDest":0}'
-# → fraud_probability 0.00008, decision LEGITIMATE
+  -Body '{"step":1,"type":"PAYMENT","amount":9839.64,"oldbalanceOrg":170136,"newbalanceOrig":160296.36,"oldbalanceDest":0,"newbalanceDest":0}'
+# → fraud_probability 0.00004, decision LEGITIMATE
 ```
 
-**What happens inside one request:** JSON → Pydantic checks the fields (negative amounts are rejected with error 422) → `prepare_transaction()` builds the 12 features → `model.predict_proba()` → compare with 0.4 → JSON answer.
+**What happens inside one request:** JSON → Pydantic checks the fields (negative, NaN or infinite numbers and unknown types are rejected with error 422) → `prepare_transaction()` builds the 14 features → `model.predict_proba()` → compare with 0.3 → JSON answer. An unexpected error returns only a generic message with an error id; the details go to the server log.
 
 To run it in Docker instead: `docker build -t fraud-api .` then `docker run -p 8000:8000 fraud-api`.
 
@@ -233,8 +235,8 @@ python streaming/kafka_fraud_consumer.py             # window 2: reads topic "tr
 python streaming/kafka_paysim_producer.py            # window 3: sends 10 transactions
 ```
 
-- `kafka_paysim_producer.py` reads the first 10 rows of `paysim_features.csv` and publishes them to the topic `transactions`.
-- `kafka_fraud_consumer.py` reads each message, sends the 6 raw fields to `POST /predict`, and prints the decision next to the true label.
+- `kafka_paysim_producer.py` reads the first 10 rows of `paysim_features.csv` and publishes their raw fields and type to the topic `transactions`.
+- `kafka_fraud_consumer.py` reads each message, sends the 6 raw fields and `type` to `POST /predict`, and prints the decision next to the true label.
 - `streaming/test_kafka_connection.py` is a quick manual check that Kafka is reachable.
 
 ---
@@ -274,7 +276,7 @@ python scripts/shared/build_shared_train_graph.py
 python scripts/shared/train_shared_xgboost.py
 ```
 
-- Same 12 features (it takes the list from `models/fraud_xgboost_model.joblib`, so step 4 must have run).
+- Same 14 features (it takes the list from `models/fraud_xgboost_model.joblib`, so step 4 must have run).
 - **Writes:** `models/shared_fraud_xgboost_model.joblib` and `outputs/predictions/shared_xgb_test_predictions.csv`
 
 ### Step 12. Train the GNN: `scripts/shared/train_shared_gnn.py`
@@ -341,7 +343,7 @@ python scripts/feast/export_gnn_for_serving.py
 python scripts/feast/train_stream_model.py          # 10+ minutes
 ```
 
-**19 features** = 12 baseline + `type_TRANSFER`, `type_CASH_OUT` + 5 behavioral (from Feast, point-in-time).
+**19 features** = the 14 baseline features (including `type_TRANSFER`, `type_CASH_OUT`) + 5 behavioral (from Feast, point-in-time).
 
 1. Re-create the shared split and check it matches `shared_train.csv`.
 2. Take 25% of the test side and split it into **validation** (half) and **final test** (half).

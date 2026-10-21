@@ -27,7 +27,7 @@ Open four terminals and a browser with these tabs ready (they load once the serv
 | Time | Show | Say |
 |---|---|---|
 | 0:00 | README on GitHub or in VS Code, the architecture diagram in `docs/ARCHITECTURE.md` | "Fraud detection on 6.3 million PaySim transactions. Fraud is 0.13%. Three tracks: an XGBoost baseline, a graph neural network, and a live streaming platform." |
-| 0:30 | Terminal 1: `uvicorn api.fraud_api:app --port 8000`, then `/docs` → `POST /predict` → *Try it out* with the fraud example below | "This is the baseline API. A transfer that empties an account gets 0.87 fraud probability, above the 0.4 threshold, so it's a FRAUD_ALERT." Then change to the normal payment: "A normal payment: 0.00008, legitimate." |
+| 0:30 | Terminal 1: `uvicorn api.fraud_api:app --port 8000`, then `/docs` → `POST /predict` → *Try it out* with the fraud example below | "This is the baseline API. A transfer that empties an account gets 0.9997 fraud probability, above the 0.3 threshold, so it's a FRAUD_ALERT." Then change only `type` to `PAYMENT`: "The same amounts as a payment score 0.009. Fraud in PaySim only happens in transfers and cash-outs, and the model uses the transaction type." Then the normal payment: "A normal payment: 0.00004, legitimate." |
 | 1:15 | Terminal 2: `uvicorn api.fraud_service:app --port 8001`; open `http://127.0.0.1:8001/` | "The streaming service loads the stream model, 19 features including recipient history from the Feast feature store, and connects to Kafka. The consumer says running." |
 | 1:45 | Terminal 3: `streamlit run dashboard/app.py`; dashboard **Alerts** tab (empty) | "This is the analyst dashboard. It only talks to the service API." |
 | 2:00 | Terminal 4: `python streaming/kafka_replay_producer.py`; switch to the dashboard | "Now I replay real transactions from hour 600 through Kafka. Watch the counters and the alert toasts." Wait until roughly 500 to 1,000 are scored. |
@@ -41,13 +41,13 @@ Open four terminals and a browser with these tabs ready (they load once the serv
 Fraud example (paysim.csv row 3):
 
 ```json
-{"step": 1, "amount": 181, "oldbalanceOrg": 181, "newbalanceOrig": 0, "oldbalanceDest": 0, "newbalanceDest": 0}
+{"step": 1, "type": "TRANSFER", "amount": 181, "oldbalanceOrg": 181, "newbalanceOrig": 0, "oldbalanceDest": 0, "newbalanceDest": 0}
 ```
 
 Normal payment (row 1):
 
 ```json
-{"step": 1, "amount": 9839.64, "oldbalanceOrg": 170136, "newbalanceOrig": 160296.36, "oldbalanceDest": 0, "newbalanceDest": 0}
+{"step": 1, "type": "PAYMENT", "amount": 9839.64, "oldbalanceOrg": 170136, "newbalanceOrig": 160296.36, "oldbalanceDest": 0, "newbalanceDest": 0}
 ```
 
 Shortcut: in VS Code, *Run and Debug* → **Run streaming platform (Feast + dashboard)** → F5 starts Kafka, the service, the dashboard, MLflow, the drift monitor and the replay producer together. To narrate each part, start them one by one as above.

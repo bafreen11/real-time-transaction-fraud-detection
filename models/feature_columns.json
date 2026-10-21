@@ -10,5 +10,7 @@
   "amount_to_origin_balance",
   "amount_to_destination_balance",
   "step_day",
-  "step_hour"
+  "step_hour",
+  "type_TRANSFER",
+  "type_CASH_OUT"
 ]

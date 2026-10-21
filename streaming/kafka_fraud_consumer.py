@@ -2,7 +2,7 @@ import json
 import requests
 from kafka import KafkaConsumer
 
-from fraud_detection.features.engineering import RAW_TRANSACTION_FIELDS
+from fraud_detection.features.engineering import TRANSACTION_FIELDS
 
 # --------------------------------------------------
 # Configuration
@@ -45,8 +45,8 @@ try:
             print("Skipping message: missing features.")
             continue
 
-        # FastAPI expects these six original transaction fields.
-        required_fields = RAW_TRANSACTION_FIELDS
+        # FastAPI expects the six raw numeric fields plus "type".
+        required_fields = TRANSACTION_FIELDS
 
         missing = [
             field for field in required_fields

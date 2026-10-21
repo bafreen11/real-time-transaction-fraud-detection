@@ -25,7 +25,7 @@ from fraud_detection.config import (
     RAW_DATA_PATH,
     REPLAY_START_STEP,
 )
-from fraud_detection.features.engineering import RAW_TRANSACTION_FIELDS
+from fraud_detection.features.engineering import TRANSACTION_FIELDS
 
 MAX_TRANSACTIONS = int(os.environ.get("REPLAY_MAX_TRANSACTIONS", "2000"))
 DELAY_SECONDS = float(os.environ.get("REPLAY_DELAY_SECONDS", "0.05"))
@@ -73,7 +73,7 @@ try:
                 "transaction_id": int(transaction_id),
                 "transaction": transaction,
                 # Kept for streaming/kafka_fraud_consumer.py (baseline API)
-                "features": {f: transaction[f] for f in RAW_TRANSACTION_FIELDS},
+                "features": {f: transaction[f] for f in TRANSACTION_FIELDS},
                 "transaction_type": transaction["type"],
                 "nameOrig": transaction["nameOrig"],
                 "nameDest": transaction["nameDest"],

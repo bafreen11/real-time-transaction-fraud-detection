@@ -10,7 +10,8 @@ import api.fraud_api as fraud_api
 client = TestClient(fraud_api.app)
 
 VALID = {
-    "step": 1, "amount": 181.0, "oldbalanceOrg": 181.0, "newbalanceOrig": 0.0,
+    "step": 1, "type": "TRANSFER", "amount": 181.0, "oldbalanceOrg": 181.0,
+    "newbalanceOrig": 0.0,
     "oldbalanceDest": 0.0, "newbalanceDest": 0.0,
 }
 
@@ -23,8 +24,9 @@ def post_raw(body):
 
 
 def test_non_finite_amount_is_a_validation_error():
-    body = '{"step": 1, "amount": NaN, "oldbalanceOrg": 181, ' \
-           '"newbalanceOrig": 0, "oldbalanceDest": 0, "newbalanceDest": 0}'
+    body = '{"step": 1, "type": "TRANSFER", "amount": NaN, ' \
+           '"oldbalanceOrg": 181, "newbalanceOrig": 0, ' \
+           '"oldbalanceDest": 0, "newbalanceDest": 0}'
     assert post_raw(body).status_code == 422
 
     body = body.replace("NaN", "Infinity")

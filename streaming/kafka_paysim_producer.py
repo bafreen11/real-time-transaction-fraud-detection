@@ -3,27 +3,25 @@ import time
 import pandas as pd
 from kafka import KafkaProducer
 
-from fraud_detection.config import (
-    FEATURE_COLUMNS_PATH as FEATURE_PATH,
-    FEATURES_DATA_PATH as DATA_PATH,
-)
+from fraud_detection.config import FEATURES_DATA_PATH as DATA_PATH
+from fraud_detection.features.engineering import TRANSACTION_FIELDS
 
 TOPIC = "transactions"
 BOOTSTRAP_SERVERS = "localhost:9092"
 BATCH_SIZE = 10
 
-# Load the exact feature order used by the trained model
-with open(FEATURE_PATH, "r") as file:
-    feature_columns = json.load(file)
+# The consumer forwards these fields to the API, which builds the
+# model features itself.
+feature_columns = TRANSACTION_FIELDS
 
 # Read only a small batch for our first test
 df = pd.read_csv(DATA_PATH, nrows=BATCH_SIZE)
 
-# Verify that all model features exist in the CSV
+# Verify that all API input fields exist in the CSV
 missing = [col for col in feature_columns if col not in df.columns]
 
 if missing:
-    raise ValueError(f"Missing model features: {missing}")
+    raise ValueError(f"Missing API input fields: {missing}")
 
 producer = KafkaProducer(
     bootstrap_servers=BOOTSTRAP_SERVERS,
@@ -33,7 +31,7 @@ producer = KafkaProducer(
 try:
     for index, row in df.iterrows():
 
-        # Features that the XGBoost model expects
+        # Raw transaction fields that the API expects
         features = {
             col: (
                 None if pd.isna(row[col])

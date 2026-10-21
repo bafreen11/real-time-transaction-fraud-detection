@@ -4,7 +4,7 @@ Two FastAPI services. Both publish interactive docs at `/docs` (Swagger UI) and 
 
 | Service | File | Start command | Model |
 |---|---|---|---|
-| Baseline API | `api/fraud_api.py` | `uvicorn api.fraud_api:app --port 8000` | `models/fraud_xgboost_validated_model.joblib` (12 features, threshold 0.4) |
+| Baseline API | `api/fraud_api.py` | `uvicorn api.fraud_api:app --port 8000` | `models/fraud_xgboost_validated_model.joblib` (14 features, threshold 0.3) |
 | Streaming fraud service | `api/fraud_service.py` | `uvicorn api.fraud_service:app --port 8001` | `models/stream_xgboost_model.joblib` + GNN artifact (19 features) |
 
 Run both from the project root, after `pip install -e .`.
@@ -16,7 +16,7 @@ Run both from the project root, after `pip install -e .`.
 ### `GET /`: health
 
 ```json
-{"message": "PaySim Fraud Detection API is running", "model": "XGBoost", "threshold": 0.4}
+{"message": "PaySim Fraud Detection API is running", "model": "XGBoost", "threshold": 0.3}
 ```
 
 ### `POST /predict`: score one transaction
@@ -26,6 +26,7 @@ Request body (all fields required):
 | Field | Type | Rule |
 |---|---|---|
 | `step` | int | ≥ 1 |
+| `type` | string | one of `PAYMENT`, `TRANSFER`, `CASH_OUT`, `DEBIT`, `CASH_IN` |
 | `amount` | float | ≥ 0 |
 | `oldbalanceOrg` | float | ≥ 0 |
 | `newbalanceOrig` | float | ≥ 0 |
@@ -33,28 +34,28 @@ Request body (all fields required):
 | `newbalanceDest` | float | ≥ 0 |
 
 ```json
-{"step": 1, "amount": 181, "oldbalanceOrg": 181, "newbalanceOrig": 0,
- "oldbalanceDest": 0, "newbalanceDest": 0}
+{"step": 1, "type": "TRANSFER", "amount": 181, "oldbalanceOrg": 181,
+ "newbalanceOrig": 0, "oldbalanceDest": 0, "newbalanceDest": 0}
 ```
 
 Response:
 
 ```json
-{"fraud_probability": 0.865428, "predicted_label": 1,
- "decision": "FRAUD_ALERT", "threshold": 0.4}
+{"fraud_probability": 0.99972, "predicted_label": 1,
+ "decision": "FRAUD_ALERT", "threshold": 0.3}
 ```
 
 | Status | When |
 |---|---|
 | 200 | scored |
-| 422 | missing field, wrong type, negative value or `step` < 1 |
-| 500 | the model failed |
+| 422 | missing field, wrong type, unknown transaction `type`, negative, NaN or infinite value, or `step` < 1. The body lists each error's `loc`, `msg` and `type`, without echoing the input |
+| 500 | unexpected server error. The body is only `{"detail": "Prediction failed. Error id: <id>"}`; the traceback is in the server log under the same id |
 
 PowerShell example:
 
 ```powershell
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/predict -ContentType "application/json" `
-  -Body '{"step":1,"amount":181,"oldbalanceOrg":181,"newbalanceOrig":0,"oldbalanceDest":0,"newbalanceDest":0}'
+  -Body '{"step":1,"type":"TRANSFER","amount":181,"oldbalanceOrg":181,"newbalanceOrig":0,"oldbalanceDest":0,"newbalanceDest":0}'
 ```
 
 ---
@@ -111,6 +112,8 @@ Response:
 
 `fraud_score = (1 − gnn_weight) × xgboost_probability + gnn_weight × gnn_probability`. An alert opens a case with status `OPEN` and publishes to the `fraud_alerts` topic.
 
+Errors work as in the baseline API: 422 for invalid input (including NaN or infinite numbers), listing `loc`, `msg` and `type` without echoing the input; 500 returns only `{"detail": "Scoring failed. Error id: <id>"}`, with the traceback in the server log.
+
 ### `GET /stats`
 
 Example shape (values depend on the replay and on analyst activity):
@@ -164,7 +167,7 @@ Loads `models/stream_xgboost_model.joblib` again without a restart (called by th
   "transaction": {"step": 600, "type": "TRANSFER", "amount": 1520.0,
                    "nameOrig": "C...", "oldbalanceOrg": 1520.0, "newbalanceOrig": 0.0,
                    "nameDest": "C...", "oldbalanceDest": 0.0, "newbalanceDest": 0.0},
-  "features": {"step": 600, "amount": 1520.0, "...": "6 raw fields, for the baseline consumer"},
+  "features": {"step": 600, "amount": 1520.0, "...": "6 raw fields + type, for the baseline consumer"},
   "transaction_type": "TRANSFER", "nameOrig": "C...", "nameDest": "C...",
   "actual_is_fraud": 1
 }

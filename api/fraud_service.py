@@ -17,7 +17,7 @@ import os
 import threading
 import uuid
 from contextlib import asynccontextmanager
-from typing import Literal, Optional
+from typing import Optional
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -46,6 +46,7 @@ from fraud_detection.features.behavioral import (
     is_tracked_recipient,
     update_recipient_state,
 )
+from fraud_detection.features.engineering import TransactionType
 from fraud_detection.features.stream import (
     STREAM_TRANSACTION_FIELDS,
     build_stream_features,
@@ -259,7 +260,7 @@ class StreamTransaction(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False)
 
     step: int = Field(ge=1)
-    type: Literal["PAYMENT", "TRANSFER", "CASH_OUT", "DEBIT", "CASH_IN"]
+    type: TransactionType
     amount: float = Field(ge=0)
     nameOrig: str
     oldbalanceOrg: float = Field(ge=0)

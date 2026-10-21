@@ -1,6 +1,8 @@
+from typing import Literal
+
 import pandas as pd
 
-# The six raw PaySim fields a transaction must provide for scoring.
+# The six raw numeric PaySim fields of a transaction.
 RAW_TRANSACTION_FIELDS = [
     "step",
     "amount",
@@ -9,6 +11,12 @@ RAW_TRANSACTION_FIELDS = [
     "oldbalanceDest",
     "newbalanceDest",
 ]
+
+# Fields a transaction must provide for scoring (the API inputs).
+TRANSACTION_FIELDS = RAW_TRANSACTION_FIELDS + ["type"]
+
+# The five PaySim transaction types.
+TransactionType = Literal["PAYMENT", "TRANSFER", "CASH_OUT", "DEBIT", "CASH_IN"]
 
 # Features created by create_features().
 ENGINEERED_FEATURES = [
@@ -20,8 +28,14 @@ ENGINEERED_FEATURES = [
     "step_hour",
 ]
 
+# PaySim fraud only occurs in TRANSFER and CASH_OUT transactions, so
+# those two types get indicator features (also created by
+# create_features). Adopted after scripts/xgboost/compare_transaction_type.py
+# showed better validation results than the 12 features without them.
+TYPE_FEATURES = ["type_TRANSFER", "type_CASH_OUT"]
+
 # Exact feature names and order used to train the XGBoost models.
-FEATURE_COLUMNS = RAW_TRANSACTION_FIELDS + ENGINEERED_FEATURES
+FEATURE_COLUMNS = RAW_TRANSACTION_FIELDS + ENGINEERED_FEATURES + TYPE_FEATURES
 
 
 def create_features(df):
@@ -57,10 +71,16 @@ def create_features(df):
     df["step_day"] = (df["step"] - 1) // 24
     df["step_hour"] = (df["step"] - 1) % 24
 
+    # 6. Transaction type indicators
+    for type_feature in TYPE_FEATURES:
+        df[type_feature] = (
+            df["type"] == type_feature.removeprefix("type_")
+        ).astype("int64")
+
     return df
 
 
 def prepare_transaction(transaction, feature_columns):
-    """Build a one-row model input from a dict of raw fields."""
+    """Build a one-row model input from a dict of TRANSACTION_FIELDS."""
     df = create_features(pd.DataFrame([transaction]))
     return df[feature_columns]

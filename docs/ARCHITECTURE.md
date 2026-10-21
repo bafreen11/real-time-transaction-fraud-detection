@@ -79,7 +79,7 @@ sequenceDiagram
 | Component | File(s) | Technology | Role |
 |---|---|---|---|
 | Configuration | `src/fraud_detection/config.py` | Python | every path and setting, overridable by environment variables |
-| Baseline features | `src/fraud_detection/features/engineering.py` | pandas | 12 features; the only implementation, used by training and the API |
+| Baseline features | `src/fraud_detection/features/engineering.py` | pandas | 14 features; the only implementation, used by training and the API |
 | Behavioral features | `src/fraud_detection/features/behavioral.py` | pandas, numpy | recipient state (offline and streaming versions) and 5 features derived from it |
 | Stream features | `src/fraud_detection/features/stream.py` | pandas | 19-feature vector for the stream model |
 | Feature store | `src/fraud_detection/feature_store.py`, `feature_repo/` | Feast 0.47 | offline parquet store (training), SQLite online store (serving) |
@@ -87,7 +87,7 @@ sequenceDiagram
 | GNN serving | `src/fraud_detection/models/gnn_serving.py` | numpy | torch-free GNN scoring from exported embeddings |
 | Scorer | `src/fraud_detection/serving/scorer.py` | XGBoost | blends XGBoost and GNN; hot reload |
 | Case store | `src/fraud_detection/serving/case_store.py` | SQLite | scored transactions, cases, analyst feedback |
-| Baseline API | `api/fraud_api.py` | FastAPI | stateless scoring of 6 raw fields |
+| Baseline API | `api/fraud_api.py` | FastAPI | stateless scoring of 6 raw fields + `type` |
 | Fraud service | `api/fraud_service.py` | FastAPI + kafka-python | streaming scoring, cases, drift and reload endpoints |
 | Dashboard | `dashboard/app.py` | Streamlit | analyst UI; talks only to the service API |
 | Drift monitor | `scripts/monitoring/check_drift.py` | Evidently 0.7 | drift reports, retraining trigger |
@@ -147,13 +147,12 @@ Fraud by type (`outputs/reports/fraud_by_type.csv`):
 
 ### 5.2 Features
 
-**Baseline (12):** `step, amount, oldbalanceOrg, newbalanceOrig, oldbalanceDest, newbalanceDest, origin_balance_error, destination_balance_error, amount_to_origin_balance, amount_to_destination_balance, step_day, step_hour`. Formulas are in [WALKTHROUGH.md, Step 3](WALKTHROUGH.md#step-3-create-features-scriptsdatarun_feature_engineeringpy).
+**Baseline (14):** `step, amount, oldbalanceOrg, newbalanceOrig, oldbalanceDest, newbalanceDest, origin_balance_error, destination_balance_error, amount_to_origin_balance, amount_to_destination_balance, step_day, step_hour, type_TRANSFER, type_CASH_OUT`. The two type flags were added after `scripts/xgboost/compare_transaction_type.py` showed better validation results with them (`outputs/reports/transaction_type_comparison.csv`). Formulas are in [WALKTHROUGH.md, Step 3](WALKTHROUGH.md#step-3-create-features-scriptsdatarun_feature_engineeringpy).
 
-**Stream model (19)** = the 12 above +:
+**Stream model (19)** = the 14 above +:
 
 | Feature | Definition |
 |---|---|
-| `type_TRANSFER`, `type_CASH_OUT` | 1 if the transaction has that type |
 | `dest_txn_count_prev` | transactions the recipient received before this one |
 | `dest_txn_count_same_day` | of those, how many on the same simulated day (velocity) |
 | `dest_steps_since_last_txn` | hours since the recipient's previous transaction (−1 if none) |
@@ -176,14 +175,14 @@ Random seed: 42 everywhere (`config.RANDOM_STATE`).
 
 | Path | Produced by | Contents |
 |---|---|---|
-| `E:\paysim_features.csv` | `run_feature_engineering.py` | raw data + 6 engineered features |
+| `E:\paysim_features.csv` | `run_feature_engineering.py` | raw data + 6 engineered features + 2 type flags |
 | `data/processed/shared_train.csv`, `shared_test.csv` | `create_shared_split.py` | the shared split |
 | `data/processed/shared_train_graph.pt` | `build_shared_train_graph.py` | PyTorch Geometric graph |
 | `data/processed/drift_reference_features.parquet` | `train_stream_model.py` | 20,000 validation feature vectors (drift baseline) |
 | `feature_repo/data/recipient_stats.parquet` | `build_feature_store.py` | recipient state after every transaction (Feast offline source) |
 | `feature_repo/data/online_store.db` | `build_feature_store.py`, fraud service | latest recipient state (Feast online store) |
 | `data/serving/fraud_cases.db` | fraud service | table `scored_transactions` (see below) |
-| `models/fraud_xgboost_validated_model.joblib` | `validate_and_test_model.py` | `{model, feature_columns, threshold}`; served on :8000 |
+| `models/fraud_xgboost_validated_model.joblib` | `validate_and_test_model.py` | `{model, feature_columns, threshold}`; served on :8000 (14 features, threshold 0.3) |
 | `models/shared_fraud_gnn_model.pt` | `train_shared_gnn.py` | GNN weights, account map, scaler |
 | `models/gnn_serving_artifact.joblib` | `export_gnn_for_serving.py` | embeddings + classifier weights (numpy) |
 | `models/stream_xgboost_model.joblib` | `train_stream_model.py` | `{model, feature_columns, threshold, gnn_weight, version}`; served on :8001 |

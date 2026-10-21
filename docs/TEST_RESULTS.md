@@ -32,21 +32,30 @@ Built-in pipeline checks (they stop the script if they fail):
 
 ## 2. Baseline XGBoost (served by the API on port 8000)
 
-10% stratified sample; test set of 127,253 transactions with 164 frauds.
+10% stratified sample of `E:\paysim_features.csv`; test set of 127,253 transactions with 164 frauds (the same rows for both models). 14 features: the 12 numeric features plus `type_TRANSFER` and `type_CASH_OUT`.
 
-| Model | Threshold | Avg. precision | Precision | Recall | F1 | False-positive rate |
-|---|---|---|---|---|---|---|
-| `fraud_xgboost_model` (80/20) | 0.5 | 0.9877 | 0.8895 | 0.9817 | 0.9333 | 0.00016 |
-| **`fraud_xgboost_validated_model` (70/10/20, served)** | **0.4** (best F1 on validation) | **0.9856** | **0.8703** | **0.9817** | **0.9226** | **0.00019** |
+| Model | Split | Threshold | Avg. precision | Precision | Recall | F1 | False-positive rate | Script |
+|---|---|---|---|---|---|---|---|---|
+| `fraud_xgboost_model` | 80/20 | 0.5 (fixed) | 0.9919 | 0.9588 | 0.9939 | 0.9760 | 0.000055 | `evaluate_model.py` |
+| **`fraud_xgboost_validated_model` (served)** | 70/10/20 | **0.3** (best F1 on validation) | **0.9916** | **0.9368** | **0.9939** | **0.9645** | **0.000087** | `plot_evaluation_figures.py` |
 
-Confusion matrix of the served model (test set):
+Confusion matrix of the served model (test set, threshold 0.3):
 
 | | Predicted legitimate | Predicted fraud |
 |---|---|---|
-| **Actual legitimate** | 127,065 | 24 |
-| **Actual fraud** | 3 | 161 |
+| **Actual legitimate** | 127,078 | 11 |
+| **Actual fraud** | 1 | 163 |
 
-ROC-AUC: 0.9998. Threshold sweep for the first model: `outputs/reports/threshold_results.csv`. Confusion-matrix figure: `outputs/figures/confusion_matrix.png`.
+ROC-AUC: 0.99995. Figures: `outputs/figures/confusion_matrix.png`, `outputs/figures/pr_curve.png`. Saved metrics: `outputs/reports/served_model_test_results.csv`. Threshold sweep for the first model (exploratory, on the test set, not used to choose anything): `outputs/reports/threshold_results.csv`.
+
+**Transaction type experiment** (`scripts/xgboost/compare_transaction_type.py`, validation set only: 63,627 rows, 82 frauds; `outputs/reports/transaction_type_comparison.csv`):
+
+| Features | Val. avg. precision | Best threshold | Val. precision | Val. recall | Val. F1 | False alarms |
+|---|---|---|---|---|---|---|
+| 12 numeric | 0.9981 | 0.4 | 0.8723 | 1.0000 | 0.9318 | 12 |
+| **12 + type flags (adopted)** | **0.9996** | **0.3** | **0.9647** | **1.0000** | **0.9820** | **3** |
+
+Before the type flags, the served model scored AP 0.9856, precision 0.8703, recall 0.9817, F1 0.9226 at threshold 0.4 on the same test set.
 
 ## 3. Shared split: XGBoost vs GNN vs blend
 

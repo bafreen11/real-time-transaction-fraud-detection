@@ -1,0 +1,2 @@
+model_artifact,test_rows,test_fraud,threshold,average_precision,precision,recall,f1,true_negatives,false_positives,false_negatives,true_positives
+fraud_xgboost_validated_model.joblib,127253,164,0.3,0.9915627192834804,0.9367816091954023,0.9939024390243902,0.9644970414201184,127078,11,1,163

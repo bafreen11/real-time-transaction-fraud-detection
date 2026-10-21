@@ -11,6 +11,7 @@ threshold = saved["threshold"]
 # The exact transaction you tested in Swagger
 data = {
     "step": 1,
+    "type": "TRANSFER",
     "amount": 181,
     "oldbalanceOrg": 181,
     "newbalanceOrig": 0,

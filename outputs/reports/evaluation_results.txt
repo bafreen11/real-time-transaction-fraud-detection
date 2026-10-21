@@ -5,13 +5,13 @@ Test rows: 127253
 Actual fraud cases: 164
 
 Confusion Matrix:
-TN = 127069
-FP = 20
-FN = 3
-TP = 161
+TN = 127082
+FP = 7
+FN = 1
+TP = 163
 
-Precision: 0.889503
-Recall: 0.981707
-F1-score: 0.933333
-Average Precision: 0.987726
-False-positive rate: 0.000157
+Precision: 0.958824
+Recall: 0.993902
+F1-score: 0.976048
+Average Precision: 0.991937
+False-positive rate: 0.000055

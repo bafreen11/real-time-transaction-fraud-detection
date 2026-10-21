@@ -2,7 +2,6 @@ import pandas as pd
 import joblib
 
 from xgboost import XGBClassifier
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     precision_score,
     recall_score,
@@ -12,6 +11,7 @@ from sklearn.metrics import (
 )
 
 from fraud_detection.config import (
+    BASELINE_THRESHOLDS,
     FEATURES_DATA_PATH,
     RANDOM_STATE,
     VALIDATED_THRESHOLD_RESULTS_PATH,
@@ -20,7 +20,7 @@ from fraud_detection.config import (
 )
 from fraud_detection.data.splits import (
     baseline_sample,
-    baseline_train_test_split,
+    baseline_train_val_test_split,
 )
 from fraud_detection.features.engineering import FEATURE_COLUMNS
 
@@ -35,17 +35,10 @@ df_sample = baseline_sample(df)
 X = df_sample[feature_columns]
 y = df_sample["isFraud"]
 
-# Step 3: Reserve 20% for the final test set
-X_train_val, X_test, y_train_val, y_test = baseline_train_test_split(X, y)
-
-# Step 4: Split remaining data into training and validation
-# Overall proportions: 70% train, 10% validation, 20% test
-X_train, X_val, y_train, y_val = train_test_split(
-    X_train_val,
-    y_train_val,
-    test_size=0.125,
-    stratify=y_train_val,
-    random_state=RANDOM_STATE
+# Step 3: 70% train, 10% validation, 20% test (the same test rows as
+# train_model.py)
+X_train, X_val, X_test, y_train, y_val, y_test = (
+    baseline_train_val_test_split(X, y)
 )
 
 print("Training rows:", len(X_train))
@@ -76,10 +69,7 @@ model.fit(X_train, y_train)
 # Step 7: Select threshold using validation data only
 val_prob = model.predict_proba(X_val)[:, 1]
 
-thresholds = [
-    0.10, 0.20, 0.30, 0.40, 0.50,
-    0.60, 0.70, 0.80, 0.90
-]
+thresholds = BASELINE_THRESHOLDS
 
 threshold_results = []
 

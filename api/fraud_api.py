@@ -8,7 +8,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from fraud_detection.config import XGBOOST_VALIDATED_MODEL_PATH
-from fraud_detection.features.engineering import prepare_transaction
+from fraud_detection.features.engineering import (
+    TransactionType,
+    prepare_transaction,
+)
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("fraud_api")
@@ -66,6 +69,7 @@ class Transaction(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False)
 
     step: int = Field(ge=1)
+    type: TransactionType
     amount: float = Field(ge=0)
     oldbalanceOrg: float = Field(ge=0)
     newbalanceOrig: float = Field(ge=0)

@@ -5,7 +5,7 @@ from fraud_detection.config import (
     FEATURES_DATA_PATH as DATA_PATH,
     XGBOOST_MODEL_PATH as MODEL_PATH,
 )
-from fraud_detection.features.engineering import RAW_TRANSACTION_FIELDS
+from fraud_detection.features.engineering import TRANSACTION_FIELDS
 
 saved = joblib.load(MODEL_PATH)
 model = saved["model"]
@@ -86,13 +86,13 @@ print("Legitimate cases correctly classified:", int((legit_probs < 0.5).sum()), 
 # Get one real fraud transaction
 row = fraud_df.iloc[0]
 
-raw_columns = RAW_TRANSACTION_FIELDS
+raw_columns = TRANSACTION_FIELDS
 
 print("\nCOPY THESE VALUES INTO FASTAPI /docs:")
 payload = {
     col: (
-        int(row[col])
-        if col == "step"
+        int(row[col]) if col == "step"
+        else str(row[col]) if col == "type"
         else float(row[col])
     )
     for col in raw_columns

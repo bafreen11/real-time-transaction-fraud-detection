@@ -33,6 +33,7 @@ from fraud_detection.features.stream import (
 
 TRANSACTION = {
     "step": 26,
+    "type": "CASH_OUT",
     "amount": 1000.0,
     "oldbalanceOrg": 5000.0,
     "newbalanceOrig": 4000.0,
@@ -46,7 +47,7 @@ def empty_state(rows=1):
 
 
 # --------------------------------------------------
-# Baseline features (12)
+# Baseline features (14, including the transaction type flags)
 # --------------------------------------------------
 
 def test_engineered_feature_values():
@@ -58,12 +59,14 @@ def test_engineered_feature_values():
     assert row["amount_to_destination_balance"] == pytest.approx(1000 / 201)
     assert row["step_day"] == 1                     # step 26 = day 1, hour 1
     assert row["step_hour"] == 1
+    assert row["type_CASH_OUT"] == 1                # type indicator flags
+    assert row["type_TRANSFER"] == 0
 
 
 def test_prepare_transaction_keeps_training_order():
     X = prepare_transaction(TRANSACTION, FEATURE_COLUMNS)
     assert list(X.columns) == FEATURE_COLUMNS
-    assert X.shape == (1, 12)
+    assert X.shape == (1, 14)
 
 
 @pytest.mark.parametrize(

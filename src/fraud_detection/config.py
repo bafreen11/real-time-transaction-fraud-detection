@@ -73,15 +73,39 @@ SHARED_GNN_PREDICTIONS_PATH = (
 SHARED_BLENDED_PREDICTIONS_PATH = (
     PREDICTIONS_DIR / "shared_blended_test_predictions.csv"
 )
+# Validation predictions, aligned on transaction_index = row position
+# in shared_train.csv.
+SHARED_XGB_VALIDATION_PREDICTIONS_PATH = (
+    PREDICTIONS_DIR / "shared_xgb_validation_predictions.csv"
+)
+SHARED_GNN_VALIDATION_PREDICTIONS_PATH = (
+    PREDICTIONS_DIR / "shared_gnn_validation_predictions.csv"
+)
 
-SHARED_BLEND_COMPARISON_PATH = REPORTS_DIR / "shared_blend_comparison.csv"
+SHARED_GNN_STRATEGY_COMPARISON_PATH = (
+    REPORTS_DIR / "shared_gnn_strategy_comparison.csv"
+)
+# Validation grid (weight x threshold) and the one-off test evaluation
+SHARED_BLEND_COMPARISON_PATH = (
+    REPORTS_DIR / "shared_blend_validation_selection.csv"
+)
+SHARED_BLEND_TEST_RESULTS_PATH = REPORTS_DIR / "shared_blend_test_results.csv"
 THRESHOLD_RESULTS_PATH = REPORTS_DIR / "threshold_results.csv"
 VALIDATED_THRESHOLD_RESULTS_PATH = (
     REPORTS_DIR / "validated_threshold_results.csv"
 )
 EVALUATION_RESULTS_PATH = REPORTS_DIR / "evaluation_results.txt"
+SERVED_MODEL_TEST_RESULTS_PATH = REPORTS_DIR / "served_model_test_results.csv"
+TRANSACTION_TYPE_COMPARISON_PATH = (
+    REPORTS_DIR / "transaction_type_comparison.csv"
+)
 
 CONFUSION_MATRIX_PATH = FIGURES_DIR / "confusion_matrix.png"
+PR_CURVE_PATH = FIGURES_DIR / "pr_curve.png"
+SHARED_BLEND_PR_CURVE_PATH = FIGURES_DIR / "shared_blend_pr_curve.png"
+SHARED_BLEND_CONFUSION_MATRIX_PATH = (
+    FIGURES_DIR / "shared_blend_confusion_matrix.png"
+)
 
 # --------------------------------------------------
 # Experiment settings
@@ -92,11 +116,22 @@ RANDOM_STATE = 42
 # Baseline XGBoost track: 10% stratified sample, 80/20 split
 BASELINE_SAMPLE_FRACTION = 0.10
 BASELINE_TEST_FRACTION = 0.20
+# Validation share of the remaining 80%: 0.125 * 0.8 = 10% overall,
+# giving a 70/10/20 train/validation/test split.
+BASELINE_VALIDATION_FRACTION_OF_TRAIN = 0.125
+# Candidate decision thresholds, compared on validation data only.
+BASELINE_THRESHOLDS = [0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90]
 
 # Shared track: 80/20 split of the full dataset,
 # training side keeps all fraud plus a legitimate sample
 SHARED_TEST_FRACTION = 0.20
 SHARED_TRAIN_LEGITIMATE_SAMPLE = 100_000
+# Stratified share of shared_train.csv held out as the validation set
+# for GNN strategy, blend weight and threshold selection.
+SHARED_VALIDATION_FRACTION = 0.15
+# Blend candidates compared on that validation set
+SHARED_BLEND_XGB_WEIGHTS = [1.00, 0.90, 0.75, 0.50, 0.25, 0.00]
+SHARED_BLEND_THRESHOLDS = [round(0.05 * i, 2) for i in range(1, 20)]
 
 MLFLOW_EXPERIMENT_NAME = "PaySim_Fraud_Detection"
 

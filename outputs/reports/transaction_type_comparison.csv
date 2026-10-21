@@ -1,0 +1,3 @@
+candidate,feature_count,val_average_precision,best_threshold,val_precision,val_recall,val_f1,val_false_positives,val_missed_fraud,val_average_precision_TRANSFER,val_average_precision_CASH_OUT
+baseline_12_features,12,0.9981438978605898,0.4,0.8723404255319149,1.0,0.9318181818181819,12,0,1.0,0.9992307692307691
+with_transaction_type,14,0.9995695839311334,0.3,0.9647058823529412,1.0,0.9820359281437125,3,0,1.0,0.9992307692307693
