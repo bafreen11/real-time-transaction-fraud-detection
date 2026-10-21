@@ -8,7 +8,7 @@ Fraud detection on the PaySim synthetic mobile-money dataset. The project covers
 
 ## Layout and conventions
 
-- `src/fraud_detection/` is the only importable code. It holds `config.py` (every path and experiment constant), `data/loading.py`, `data/splits.py`, `features/engineering.py`, `features/behavioral.py`, `features/stream.py`, `feature_store.py`, `models/gnn.py`, `models/gnn_serving.py`, `serving/` (scorer, case store) and `eda.py`.
+- `src/fraud_detection/` is the only importable code. It holds `config.py` (every path and experiment constant), `data/loading.py`, `data/splits.py`, `features/engineering.py`, `features/behavioral.py`, `features/stream.py`, `feature_store.py`, `models/gnn.py`, `models/gnn_serving.py`, `serving/` (scorer, case store), `evaluation.py` (threshold metrics, PR-curve and confusion-matrix figures) and `eda.py`.
 - `scripts/{data,xgboost,shared,feast,monitoring,diagnostics}/`, `api/`, `dashboard/` and `streaming/` contain standalone scripts that run top to bottom (no `main()`). Never import them.
 - **Never hard-code paths.** Add a constant to `fraud_detection.config` and import it. Output-writing scripts call `config.ensure_output_dirs()` first.
 - The raw data lives outside the repo: `E:\paysim.csv` and `E:\paysim_features.csv`, overridable with the `PAYSIM_RAW_PATH` and `PAYSIM_FEATURES_PATH` environment variables.
@@ -20,7 +20,9 @@ Fraud detection on the PaySim synthetic mobile-money dataset. The project covers
 Run everything from the project root. Imports need the package installed (`pip install -e .`) or `PYTHONPATH=src`. The API also needs the project root on the path, which uvicorn provides when run from the root.
 
 ```powershell
-pip install -r requirements-dev.txt; pip install -e .
+pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements-dev.txt; pip install --no-deps pyarrow==25.0.1; pip install -e .
+python -m pytest                                    # test suite (tests/), ~15 s
 python scripts/xgboost/train_model.py               # any script: python <path>
 uvicorn api.fraud_api:app --port 8000               # baseline API
 uvicorn api.fraud_service:app --port 8001           # streaming fraud service (Feast + Kafka)
@@ -30,21 +32,23 @@ docker build -t fraud-api .                         # image uses PYTHONPATH=/app
 mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
 ```
 
-There are no automated tests or linters. `streaming/test_kafka_connection.py` is a manual smoke script. `requirements.txt` covers only the baseline API image; `requirements-dev.txt` adds torch, torch_geometric, mlflow, kafka-python, requests, matplotlib, feast, evidently and streamlit. `requirements-service.txt` and `requirements-dashboard.txt` are for the streaming-service and dashboard images. VS Code launch configs (`.vscode/launch.json`) start each server or the whole platform ("Run streaming platform").
+Tests live in `tests/` (pytest; `pyproject.toml` puts `src` and the project root on the path). Run them before committing; there are no linters. `streaming/test_kafka_connection.py` is a manual smoke script. Tested on Python 3.12.1 (use 3.11 or 3.12: numpy 1.26.4 has no 3.13 wheels; the Docker images use 3.11). `requirements.txt` covers only the baseline API image; `requirements-dev.txt` pins everything else (torch CPU build, torch_geometric, mlflow, kafka-python, requests, matplotlib, feast, evidently, streamlit, pytest, httpx). `requirements-service.txt` and `requirements-dashboard.txt` are for the streaming-service and dashboard images. VS Code launch configs (`.vscode/launch.json`) start each server or the whole platform ("Run streaming platform").
 
 ## Pipelines
 
 There are three separate modeling tracks. Do not mix their artifacts.
 
 **1. Baseline XGBoost track** (`scripts/xgboost/`; 10% stratified sample of `paysim_features.csv`, then an 80/20 split)
-`scripts/data/run_feature_engineering.py` → `train_model.py` (writes `models/fraud_xgboost_model.joblib`, threshold 0.5) → `validate_and_test_model.py` (70/10/20 split; chooses the F1-best threshold on validation; writes `models/fraud_xgboost_validated_model.joblib`, **the model the API serves**). Evaluation, threshold analysis, the confusion-matrix plot and MLflow tracking all re-create the split through `fraud_detection.data.splits.baseline_split`. Change sampling only there and in `config`.
+`scripts/data/run_feature_engineering.py` → `train_model.py` (writes `models/fraud_xgboost_model.joblib`, threshold 0.5) → `validate_and_test_model.py` (70/10/20 split; chooses the F1-best threshold on validation; writes `models/fraud_xgboost_validated_model.joblib`, **the model the API serves**). The 70/10/20 split is `splits.baseline_train_val_test_split` (also used by `compare_transaction_type.py`, a validation-only feature comparison). `plot_evaluation_figures.py` writes the served model's confusion matrix (counts), PR curve and `served_model_test_results.csv`. Evaluation, threshold analysis, the figures and MLflow tracking all re-create the split through `fraud_detection.data.splits.baseline_split`. Change sampling only there and in `config`.
 
 **2. Shared track** (one fixed split used by both XGBoost and the GNN, so their scores can be blended)
 `scripts/data/create_shared_split.py` (stratified 80/20 split of the full raw data; the training side keeps all fraud plus 100k sampled legitimate rows) → `scripts/shared/build_shared_train_graph.py` → `train_shared_xgboost.py` and `train_shared_gnn.py` → `blend_shared_models.py`.
 - Prediction CSVs are aligned on `transaction_index` (the row position in `shared_test.csv`), and the blend script checks this. Keep row order unchanged.
+- A stratified 15% of `shared_train.csv` is the validation set (`splits.shared_validation_split`, the same rows for XGBoost and the GNN; both train on the other 85%). `shared_train.csv` is ~6% fraud, so validation metrics use `splits.shared_validation_weights` (legitimate rows weighted back to the natural 0.13% rate). Never choose anything on `shared_test.csv`.
 - The GNN builds account IDs and node features (log sender/recipient counts) from **training transactions only**. Test accounts never seen in training map to `-1` and get zero embeddings. This is deliberate leakage prevention.
+- GNN edge rules (top of `train_shared_gnn.py`): a scored transaction is never in the message graph that embeds its accounts ("disjoint" strategy, a 70/30 message/supervision split per epoch); node features count message edges only; accounts without message edges get zero embeddings. The old "transductive" strategy is trained for comparison and the better validation AP is kept.
 - `train_shared_xgboost.py` takes its feature list from `models/fraud_xgboost_model.joblib`, so that file has to exist.
-- Blend weights are exploratory and evaluated on the test set. The saved 0.75/0.25 blend is a candidate, not a selected model.
+- `blend_shared_models.py` chooses the XGBoost weight and threshold on the (weighted) validation set, then scores the test set once. Current choice: XGBoost 1.0 / GNN 0.0, threshold 0.95.
 
 **3. Streaming track** (Feast features, served by `api/fraud_service.py`)
 `scripts/feast/build_feature_store.py` (recipient-account state snapshots → `feature_repo/data/recipient_stats.parquet`, `feast apply`, online store bootstrapped with history before `REPLAY_START_STEP`) → `export_gnn_for_serving.py` (shared GNN → numpy artifact, checked against saved GNN predictions) → `train_stream_model.py` (recreates the shared split via `splits.shared_split`, point-in-time Feast features, blend weight + threshold picked on half of a `shared_test` sample, test on the other half, champion/challenger promotion, MLflow experiment `PaySim_Stream_Model`).
@@ -63,7 +67,7 @@ There are three separate modeling tracks. Do not mix their artifacts.
 ## Model / feature contract
 
 - Joblib artifacts are dicts: `{"model", "feature_columns"}`, plus `"threshold"` in the validated model.
-- `features/engineering.py` defines `RAW_TRANSACTION_FIELDS` (the 6 API inputs), `ENGINEERED_FEATURES` and `FEATURE_COLUMNS` (12, in training order; mirrored in `models/feature_columns.json`). `create_features` is the single feature implementation. The API and the debug script go through `prepare_transaction`, so training and serving can't drift apart.
+- `features/engineering.py` defines `RAW_TRANSACTION_FIELDS` (6 numeric fields), `TRANSACTION_FIELDS` (those + `type`: the API inputs), `TransactionType`, `ENGINEERED_FEATURES`, `TYPE_FEATURES` and `FEATURE_COLUMNS` (14, in training order; mirrored in `models/feature_columns.json`). `STREAM_FEATURE_COLUMNS` = `FEATURE_COLUMNS` + 5 behavioral (19). `create_features` is the single feature implementation. The API and the debug script go through `prepare_transaction`, so training and serving can't drift apart.
 - GNN `.pt` checkpoints hold `model_state_dict`, `account_to_id`, the fitted `StandardScaler`, `edge_feature_columns` and `hidden_channels`. Keep the `FraudGNN` layer names (`conv1`, `conv2`, `classifier`) unchanged, or existing checkpoints won't load.
 
 ## MLflow

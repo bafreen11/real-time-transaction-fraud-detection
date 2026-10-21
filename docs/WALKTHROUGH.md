@@ -49,7 +49,7 @@ paysim.csv (6.3M rows)
 .venv\Scripts\Activate.ps1                 # turn on the project's Python
 pip install -r requirements-dev.txt        # all libraries (XGBoost, torch, Feast, ...)
 pip install -e .                           # makes `import fraud_detection` work everywhere
-python -m pytest                           # 28 tests, about 20 seconds: proves the setup works
+python -m pytest                           # 32 tests, about 15 seconds: proves the setup works
 ```
 
 **What `pip install -e .` does:** it registers `src/fraud_detection/` as an installed package, so every script can write `from fraud_detection.config import ...`. The `-e` means "editable": if you change the code, the change is used at once.

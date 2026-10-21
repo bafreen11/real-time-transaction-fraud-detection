@@ -8,12 +8,13 @@ All numbers come from saved reports, MLflow runs (`mlflow.db`) or a re-run on 21
 python -m pytest -v
 ```
 
-**Result: 28 passed, 0 failed (about 20 s).**
+**Result: 32 passed, 0 failed (about 15 s).**
 
 | Test file | Tests | Covers |
 |---|---|---|
 | `tests/test_features.py` | 11 | feature formulas; saved models match the feature list; live recipient-state update equals the offline training state; 19-feature stream vector |
-| `tests/test_baseline_api.py` | 6 | `GET /`, fraud row → `FRAUD_ALERT`, normal payment → `LEGITIMATE`, invalid input → 422 |
+| `tests/test_baseline_api.py` | 8 | `GET /`, fraud row → `FRAUD_ALERT`, normal payment → `LEGITIMATE`, invalid input (incl. missing or unknown `type`) → 422 |
+| `tests/test_api_errors.py` | 2 | NaN / Infinity → 422; an unexpected error → 500 with a generic message and error id, details only in the server log |
 | `tests/test_stream_service.py` | 5 | health, blended score formula, alert opens a case, case update via API, 404 / 422 handling |
 | `tests/test_case_store.py` | 4 | alert vs non-alert cases, status workflow, feedback labels for retraining, invalid status/label |
 | `tests/test_model_quality.py` | 2 | shared XGBoost on 200,000 held-out rows: AP ≥ 0.95, recall ≥ 0.95; numpy GNN = PyTorch GNN (diff < 1e-4) |
@@ -138,12 +139,12 @@ Latency was measured in-process (FastAPI TestClient, 300 sequential requests aft
 
 | Endpoint | Work per request | Median | p95 | Throughput (one worker) |
 |---|---|---|---|---|
-| Baseline `POST /predict` | 12 features, one XGBoost call | 24 ms | 37 ms | ~37 req/s |
+| Baseline `POST /predict` | 14 features, one XGBoost call (measured with the earlier 12-feature model) | 24 ms | 37 ms | ~37 req/s |
 | Service `POST /score` | Feast online read, 19 features, XGBoost + numpy GNN, SQLite case write | 91 ms | 193 ms | ~10 req/s |
 
 | Other | Value |
 |---|---|
-| Test suite | 28 tests in about 20 s |
+| Test suite | 32 tests in about 15 s |
 | GNN serving artifact | 29 MB numpy, no PyTorch at serving time |
 
 Most of the service's time goes to the Feast SQLite lookup and the case-store write. Scaling options: Redis as the online store, more uvicorn workers with Kafka partitions, and batching writes.

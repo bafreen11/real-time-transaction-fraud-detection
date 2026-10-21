@@ -7,7 +7,7 @@ Record the screen with **Xbox Game Bar** (`Win + Alt + R` starts and stops recor
 ```powershell
 cd "E:\Transactions Fraud Detection"
 .venv\Scripts\Activate.ps1
-python -m pytest -q                         # expect: 28 passed
+python -m pytest -q                         # expect: 32 passed
 docker compose up -d --wait kafka           # Kafka (if Docker Desktop is slow, see Plan B)
 ```
 
@@ -35,7 +35,7 @@ Open four terminals and a browser with these tabs ready (they load once the serv
 | 3:15 | **Case review** tab: open a case, show the features, set *CONFIRMED_FRAUD* + label *FRAUD* + a note → Save | "The analyst sees exactly what the model saw, for example how many times this recipient received money before. The label goes into the next retraining." |
 | 3:45 | **Drift monitor** tab, then *Open the full Evidently report* | "Drift monitoring compares live features with the training data. When half the features drift, it retrains automatically. That happened yesterday: 68% drift, a new model was trained with analyst labels and promoted because it was at least as good." |
 | 4:20 | MLflow `http://127.0.0.1:5000` → experiment *PaySim_Stream_Model* → the two runs, `trigger` tag | "Every training run is tracked: parameters, metrics, and what triggered it." |
-| 4:45 | Terminal: `python -m pytest -q` (28 passed) | "28 automated tests cover the features, both APIs, the case workflow and model quality." |
+| 4:45 | Terminal: `python -m pytest -q` (32 passed) | "32 automated tests cover the features, both APIs including error handling, the case workflow and model quality." |
 | 5:00 | stop | |
 
 Fraud example (paysim.csv row 3):
