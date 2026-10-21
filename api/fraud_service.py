@@ -15,13 +15,15 @@ import json
 import logging
 import os
 import threading
+import uuid
 from contextlib import asynccontextmanager
 from typing import Literal, Optional
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 
 from fraud_detection.config import (
     DRIFT_LATEST_REPORT_PATH,
@@ -242,7 +244,20 @@ app = FastAPI(
 )
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request, exc):
+    # The default handler echoes the rejected input back, which fails
+    # for NaN / Infinity and is not needed by the caller.
+    errors = [
+        {"loc": list(e["loc"]), "msg": e["msg"], "type": e["type"]}
+        for e in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
 class StreamTransaction(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     step: int = Field(ge=1)
     type: Literal["PAYMENT", "TRANSFER", "CASH_OUT", "DEBIT", "CASH_IN"]
     amount: float = Field(ge=0)
@@ -280,8 +295,13 @@ def score(transaction: StreamTransaction, update_state: bool = True):
         return service.score_transaction(
             transaction.model_dump(), update_state=update_state
         )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Scoring failed: {exc}")
+    except Exception:
+        # Details go to the server log only, never to the caller.
+        error_id = uuid.uuid4().hex[:12]
+        log.exception("Scoring failed (error id %s)", error_id)
+        raise HTTPException(
+            status_code=500, detail=f"Scoring failed. Error id: {error_id}"
+        )
 
 
 @app.get("/stats")

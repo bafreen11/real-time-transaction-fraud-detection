@@ -1,10 +1,17 @@
+import logging
+import uuid
+
 import joblib
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 
 from fraud_detection.config import XGBOOST_VALIDATED_MODEL_PATH
 from fraud_detection.features.engineering import prepare_transaction
 
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("fraud_api")
 
 # --------------------------------------------------
 # 1. Load the validated trained model
@@ -38,11 +45,26 @@ app = FastAPI(
 )
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request, exc):
+    # The default handler echoes the rejected input back, which fails
+    # for NaN / Infinity and is not needed by the caller.
+    errors = [
+        {"loc": list(e["loc"]), "msg": e["msg"], "type": e["type"]}
+        for e in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
 # --------------------------------------------------
 # 3. Define the incoming transaction format
 # --------------------------------------------------
 
 class Transaction(BaseModel):
+    # Invalid input (missing fields, negative or non-finite values) is
+    # rejected by FastAPI with a 422 before the model is called.
+    model_config = ConfigDict(allow_inf_nan=False)
+
     step: int = Field(ge=1)
     amount: float = Field(ge=0)
     oldbalanceOrg: float = Field(ge=0)
@@ -105,8 +127,12 @@ def predict_fraud(transaction: Transaction):
             "threshold": THRESHOLD
         }
 
-    except Exception as e:
+    except Exception:
+        # Full details stay in the server log; the caller only gets an
+        # error id to quote, never the exception text.
+        error_id = uuid.uuid4().hex[:12]
+        log.exception("Prediction failed (error id %s)", error_id)
         raise HTTPException(
             status_code=500,
-            detail=f"Prediction failed: {str(e)}"
+            detail=f"Prediction failed. Error id: {error_id}"
         )
