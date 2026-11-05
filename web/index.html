@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PaySim Fraud Detection – live demo</title>
+<style>
+  :root { --ink: #1f2937; --muted: #6b7280; --line: #e5e7eb; --brand: #1f3a5f; --ok: #047857; --bad: #b91c1c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: #f6f7f9; }
+  header { background: var(--brand); color: #fff; padding: 28px 20px; }
+  header h1 { margin: 0 0 4px; font-size: 24px; }
+  header p { margin: 0; opacity: .85; }
+  main { max-width: 920px; margin: 0 auto; padding: 24px 20px 48px; display: grid; grid-template-columns: 1.1fr .9fr; gap: 20px; }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+  h2 { font-size: 16px; margin: 0 0 14px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  input, select { width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; font: inherit; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .row { margin-bottom: 12px; }
+  .buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  button { font: inherit; border-radius: 6px; padding: 8px 14px; cursor: pointer; border: 1px solid #d1d5db; background: #fff; }
+  button.primary { background: var(--brand); color: #fff; border-color: var(--brand); width: 100%; padding: 10px; font-weight: 600; }
+  button:disabled { opacity: .6; cursor: wait; }
+  .status { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; margin-right: 6px; }
+  .dot.on { background: var(--ok); }
+  .verdict { font-size: 22px; font-weight: 700; margin: 6px 0 12px; }
+  .verdict.fraud { color: var(--bad); }
+  .verdict.legit { color: var(--ok); }
+  .bar { height: 10px; background: #eef0f3; border-radius: 5px; overflow: hidden; margin: 6px 0 4px; }
+  .bar > div { height: 100%; width: 0; background: var(--brand); transition: width .4s; }
+  .error { color: var(--bad); white-space: pre-line; }
+  .muted { color: var(--muted); font-size: 13px; }
+  a { color: var(--brand); }
+  footer { text-align: center; color: var(--muted); font-size: 13px; padding-bottom: 32px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PaySim Fraud Detection</h1>
+  <p>Score a mobile-money transaction with the validated XGBoost model (average precision 0.99 on held-out test data).</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Transaction</h2>
+    <div class="buttons">
+      <button type="button" data-example="fraud">Load a fraud example</button>
+      <button type="button" data-example="legit">Load a normal payment</button>
+    </div>
+    <form id="form">
+      <div class="grid">
+        <div class="row"><label for="type">Type</label>
+          <select id="type" name="type">
+            <option>TRANSFER</option><option>CASH_OUT</option><option>PAYMENT</option>
+            <option>CASH_IN</option><option>DEBIT</option>
+          </select></div>
+        <div class="row"><label for="step">Step (hour of the simulation, ≥ 1)</label>
+          <input id="step" name="step" type="number" min="1" step="1" required></div>
+        <div class="row"><label for="amount">Amount</label>
+          <input id="amount" name="amount" type="number" min="0" step="any" required></div>
+        <div class="row"></div>
+        <div class="row"><label for="oldbalanceOrg">Sender balance before</label>
+          <input id="oldbalanceOrg" name="oldbalanceOrg" type="number" min="0" step="any" required></div>
+        <div class="row"><label for="newbalanceOrig">Sender balance after</label>
+          <input id="newbalanceOrig" name="newbalanceOrig" type="number" min="0" step="any" required></div>
+        <div class="row"><label for="oldbalanceDest">Recipient balance before</label>
+          <input id="oldbalanceDest" name="oldbalanceDest" type="number" min="0" step="any" required></div>
+        <div class="row"><label for="newbalanceDest">Recipient balance after</label>
+          <input id="newbalanceDest" name="newbalanceDest" type="number" min="0" step="any" required></div>
+      </div>
+      <button class="primary" id="submit" type="submit">Check for fraud</button>
+      <div class="status" id="status"></div>
+    </form>
+  </section>
+
+  <section class="card" id="result">
+    <h2>Result</h2>
+    <p class="muted" id="placeholder">Load an example or enter a transaction, then press <b>Check for fraud</b>.</p>
+    <div id="output" hidden>
+      <div class="verdict" id="verdict"></div>
+      <div>Fraud probability: <b id="prob"></b></div>
+      <div class="bar"><div id="probbar"></div></div>
+      <div class="muted">Alert threshold <span id="thr"></span> (chosen on validation data for the best F1 score)</div>
+    </div>
+    <p class="error" id="error" hidden></p>
+    <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+    <p class="muted"><span class="dot" id="dot"></span><span id="api-state">Checking the API…</span></p>
+    <p class="muted">API: <a id="api-link" target="_blank" rel="noopener"></a> · <a id="docs-link" target="_blank" rel="noopener">interactive docs</a></p>
+  </section>
+</main>
+
+<footer>
+  Code: <a href="https://github.com/bafreen11/real-time-transaction-fraud-detection">github.com/bafreen11/real-time-transaction-fraud-detection</a>
+</footer>
+
+<script src="config.js"></script>
+<script>
+  const API = (new URLSearchParams(location.search).get("api") || window.FRAUD_API_URL).replace(/\/$/, "");
+  const $ = (id) => document.getElementById(id);
+  const FIELDS = ["step", "type", "amount", "oldbalanceOrg", "newbalanceOrig", "oldbalanceDest", "newbalanceDest"];
+  const EXAMPLES = {
+    // first fraud in PaySim: the whole balance is moved out and the sender is left with 0
+    fraud: { step: 1, type: "TRANSFER", amount: 181, oldbalanceOrg: 181, newbalanceOrig: 0, oldbalanceDest: 0, newbalanceDest: 0 },
+    // first row of PaySim: an ordinary payment
+    legit: { step: 1, type: "PAYMENT", amount: 9839.64, oldbalanceOrg: 170136, newbalanceOrig: 160296.36, oldbalanceDest: 0, newbalanceDest: 0 },
+  };
+
+  $("api-link").href = API; $("api-link").textContent = API.replace(/^https?:\/\//, "");
+  $("docs-link").href = API + "/docs";
+
+  function fill(ex) { FIELDS.forEach((f) => { $(f).value = ex[f]; }); }
+  document.querySelectorAll("[data-example]").forEach((b) => b.addEventListener("click", () => fill(EXAMPLES[b.dataset.example])));
+  fill(EXAMPLES.fraud);
+
+  async function call(path, options = {}) {
+    // the free Render server sleeps when idle; tell the user while it wakes up
+    const slow = setTimeout(() => { $("status").textContent = "Waking up the free server – this can take up to a minute…"; }, 3000);
+    try {
+      const res = await fetch(API + path, options);
+      const body = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, body };
+    } finally {
+      clearTimeout(slow);
+    }
+  }
+
+  async function checkApi() {
+    try {
+      const r = await call("/");
+      if (r.ok) { $("dot").classList.add("on"); $("api-state").textContent = "API online · model " + r.body.model; return; }
+      $("api-state").textContent = "API answered with status " + r.status;
+    } catch (e) {
+      $("api-state").textContent = "API not reachable yet (it may still be starting).";
+    }
+  }
+
+  $("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const tx = {};
+    FIELDS.forEach((f) => { tx[f] = f === "type" ? $(f).value : Number($(f).value); });
+    $("submit").disabled = true; $("status").textContent = "Scoring…"; $("error").hidden = true;
+    try {
+      const r = await call("/predict", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(tx) });
+      if (!r.ok) {
+        const d = r.body.detail;
+        throw new Error(Array.isArray(d) ? d.map((x) => x.loc.slice(-1)[0] + ": " + x.msg).join("\n") : (d || "Request failed (" + r.status + ")"));
+      }
+      const fraud = r.body.predicted_label === 1;
+      $("placeholder").hidden = true; $("output").hidden = false;
+      $("verdict").textContent = fraud ? "⚠ Fraud alert" : "✓ Looks legitimate";
+      $("verdict").className = "verdict " + (fraud ? "fraud" : "legit");
+      $("prob").textContent = (r.body.fraud_probability * 100).toFixed(2) + " %";
+      $("probbar").style.width = (r.body.fraud_probability * 100) + "%";
+      $("probbar").style.background = fraud ? "var(--bad)" : "var(--ok)";
+      $("thr").textContent = r.body.threshold;
+      $("status").textContent = "";
+      $("dot").classList.add("on"); $("api-state").textContent = "API online · model XGBoost";
+    } catch (err) {
+      $("error").textContent = err.message === "Failed to fetch" ? "Could not reach the API at " + API + "." : err.message;
+      $("error").hidden = false; $("status").textContent = "";
+    } finally {
+      $("submit").disabled = false;
+    }
+  });
+
+  checkApi();
+</script>
+</body>
+</html>

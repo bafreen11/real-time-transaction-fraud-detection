@@ -1,0 +1,12 @@
+# Render Blueprint: deploys the baseline scoring API (Dockerfile -> api/fraud_api.py)
+# on Render's free plan. Render dashboard -> New -> Blueprint -> pick this repository.
+# The free plan sleeps after 15 idle minutes; the first request then takes ~1 minute.
+services:
+  - type: web
+    name: fraud-api-bafreen11
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /
+    autoDeploy: true

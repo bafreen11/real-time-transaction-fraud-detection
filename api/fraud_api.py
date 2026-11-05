@@ -1,9 +1,11 @@
 import logging
+import os
 import uuid
 
 import joblib
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -45,6 +47,15 @@ app = FastAPI(
         "using a validated XGBoost model."
     ),
     version="1.1"
+)
+
+# The web/ page (Vercel / Netlify) calls this API from another origin.
+# CORS_ORIGINS="https://my-site.vercel.app" restricts it; default: any site.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 

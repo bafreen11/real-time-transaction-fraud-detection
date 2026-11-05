@@ -1,0 +1,5 @@
+# Netlify: publish the static demo page in web/ (no build step).
+# For Vercel instead: import the repository and set Root Directory = web.
+[build]
+  publish = "web"
+  command = ""

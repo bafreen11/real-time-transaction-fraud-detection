@@ -16,4 +16,5 @@ ENV PYTHONPATH=/app/src
 
 EXPOSE 8000
 
-CMD ["uvicorn", "api.fraud_api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Hosting platforms such as Render pass the port in $PORT; locally it is 8000
+CMD exec uvicorn api.fraud_api:app --host 0.0.0.0 --port ${PORT:-8000}
