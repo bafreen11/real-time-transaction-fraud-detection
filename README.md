@@ -1,5 +1,9 @@
 # PaySim Transaction Fraud Detection
 
+**Live demo:** [fraud-detection-bafreen11.netlify.app](https://fraud-detection-bafreen11.netlify.app) · **API docs:** [fraud-api-bafreen11.onrender.com/docs](https://fraud-api-bafreen11.onrender.com/docs)
+
+*Both are on free hosting that sleeps after 15 idle minutes, so the first request can take a minute to wake up.*
+
 Fraud detection on the [PaySim](https://www.kaggle.com/datasets/ealaxi/paysim1) synthetic mobile-money dataset. It combines a gradient-boosted classifier (XGBoost) with a graph neural network (GraphSAGE) over the account-to-account transaction graph, and serves the model through a FastAPI scoring service fed by a Kafka stream.
 
 ## Results
