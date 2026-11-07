@@ -1,5 +1,11 @@
-# Netlify: publish the static demo page in web/ (no build step).
+# Netlify: publish the static demo page in web/ (no build step, nothing to install).
+#
+# base = "web" is load-bearing: from the repository root Netlify finds requirements.txt and tries
+# to pip install the project dependencies on its own Python, which fails. Inside web/ there is no
+# requirements.txt, so it just uploads the two files.
+# publish is relative to base, so "." is web/ itself.
+#
 # For Vercel instead: import the repository and set Root Directory = web.
 [build]
-  publish = "web"
-  command = ""
+  base = "web"
+  publish = "."
